@@ -1,0 +1,9 @@
+{
+  "name": "local-dev",
+  "private": true,
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/start.ts"
+  }
+}

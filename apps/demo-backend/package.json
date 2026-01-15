@@ -1,0 +1,28 @@
+{
+  "name": "@golf/demo-backend",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@golf/shared-schemas": "workspace:*",
+    "zod": "^3.24.0",
+    "fastify": "^4.27.0",
+    "dotenv": "^16.4.0",
+    "pino": "^9.3.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0",
+    "eslint": "^9.10.0"
+  }
+}
