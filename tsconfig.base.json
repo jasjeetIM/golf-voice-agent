@@ -19,9 +19,5 @@
     "rootDir": "src",
 
     "resolveJsonModule": true,
-    "paths": {
-      "@golf/shared-schemas": ["packages/shared-schemas/src"],
-      "@golf/shared-schemas/*": ["packages/shared-schemas/src/*"]
-    }
   }
 }
