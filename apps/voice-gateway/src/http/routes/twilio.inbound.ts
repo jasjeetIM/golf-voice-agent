@@ -1,4 +1,19 @@
-// POST /twilio/inbound -> TwiML response placeholder
-export async function inboundHandler(req: any, res: any) {
-  // TODO: build TwiML with <Connect><Stream>
+import type { FastifyReply, FastifyRequest } from "fastify";
+import type { Env } from "../../config/env";
+import { buildConnectStreamTwiML } from "../../ws/twilio/twiml";
+
+export type TwilioInboundRequest = FastifyRequest<{Body: Record<string, string>;}>;
+
+// POST /twilio/inbound -> returns TwiML that starts the Media Stream
+export async function inboundHandler(
+  request: TwilioInboundRequest,
+  reply: FastifyReply,
+  env: Env
+) {
+  const hostHeader = request.headers["host"];
+  const baseUrl = env.PUBLIC_BASE_URL || (hostHeader ? `https://${hostHeader}` : "");
+  const wsUrl = baseUrl.replace(/^http/, "ws") + "/twilio/stream";
+
+  const twiml = buildConnectStreamTwiML(wsUrl);
+  reply.type("text/xml").send(twiml);
 }

@@ -1,4 +1,8 @@
-// GET /health placeholder
-export async function healthHandler(req: any, res: any) {
-  res.send({ status: 'ok' });
+import type { FastifyReply, FastifyRequest } from "fastify";
+
+export async function healthHandler(
+  _req: FastifyRequest,
+  reply: FastifyReply
+) {
+  reply.send({ status: "ok" });
 }

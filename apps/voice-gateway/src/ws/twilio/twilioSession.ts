@@ -1,4 +1,9 @@
-// Per-call session lifecycle placeholder
-export function handleTwilioSession(ws: any) {
-  // TODO: wrap TwilioRealtimeTransportLayer and create RealtimeSession
+import type { IncomingMessage } from "http";
+import type WebSocket from "ws";
+import { createTwilioTransport } from "../../integrations/openai/twilioTransport";
+import { parseTwilioMessage } from "./twilioMessages";
+
+// Per-call session lifecycle: wire Twilio Media Stream WS to the OpenAI transport
+export function handleTwilioSession(ws: WebSocket, req: IncomingMessage) {
+  const transport = createTwilioTransport(ws);
 }

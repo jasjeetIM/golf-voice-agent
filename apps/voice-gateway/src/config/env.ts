@@ -7,6 +7,8 @@ export const EnvSchema = z.object({
   DEMO_BACKEND_URL: z.string().default("http://localhost:8081"),
   DEMO_API_KEY: z.string().default("dev_demo_key"),
 
+  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
+
   LOG_LEVEL: z.string().default("info"),
 });
 

@@ -2,8 +2,10 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": ["ES2022"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "types": ["node"],
     "strict": true,
 
     "esModuleInterop": true,
@@ -16,6 +18,10 @@
     "outDir": "dist",
     "rootDir": "src",
 
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "paths": {
+      "@golf/shared-schemas": ["packages/shared-schemas/src"],
+      "@golf/shared-schemas/*": ["packages/shared-schemas/src/*"]
+    }
   }
 }
