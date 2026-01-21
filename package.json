@@ -5,7 +5,11 @@
   "scripts": {
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "clean": "pnpm -r exec rm -rf dist .tsbuildinfo"
+    "clean": "pnpm -r exec rm -rf dist .tsbuildinfo",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix",
+    "test": "pnpm run test:unit && npm run test:typescript",
+    "test:typescript": "tsd"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
@@ -13,6 +17,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
+    "dotenv": "^16.4.0",
     "zod": "^4"
   }
 }

@@ -1,9 +1,10 @@
 import dotenv from "dotenv";
+import path from "node:path";
 import { loadEnv } from "./config/env";
 import { createHttpServer } from "./http/server";
 import { createWsServer } from "./ws/server";
 
-dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 
 async function main() {
   const env = loadEnv(process.env);

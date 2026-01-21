@@ -2,15 +2,21 @@
 import { z } from "zod";
 import { MoneySchema } from "../domain/money.js";
 import { CourseIdSchema } from "../domain/course.js";
+import { DateSchema } from "../domain/date.js";
 
 export const TimeWindowSchema = z.object({
   start_local: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM"),
   end_local: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM"),
-});
+}).refine(
+  (tw) => tw.start_local < tw.end_local,
+  {
+    message: "start_local must be before end_local."
+  }
+);
 
 export const SearchTeeTimesRequestSchema = z.object({
   course_id: CourseIdSchema,
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+  date: DateSchema,
   time_window: TimeWindowSchema,
   players: z.number().int().min(1).max(4),
   holes: z.union([z.literal(9), z.literal(18)]).default(18),
@@ -32,7 +38,7 @@ export const TeeTimeOptionSchema = z.object({
 
 export const SearchTeeTimesResponseSchema = z.object({
   course_id: CourseIdSchema,
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: DateSchema,
   timezone: z.string(), // "America/New_York"
   options: z.array(TeeTimeOptionSchema),
   freshness: z.object({

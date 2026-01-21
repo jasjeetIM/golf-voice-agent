@@ -1,6 +1,7 @@
 // Domain types placeholder
 import { z } from "zod";
 import { CourseIdSchema } from "./course.js";
+import { DateSchema } from "./date.js";
 
 export const E164PhoneSchema = z.string().regex(/^\+\d{8,15}$/, "Expected E.164 phone number like +13361117999");
 export const ReservationStatusSchema = z.enum([
@@ -13,7 +14,7 @@ export const ReservationSchema = z.object({
   confirmation_code: z.string(),
   status: ReservationStatusSchema,
   course_id: CourseIdSchema,
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  date: DateSchema,
   start_local: z.string().regex(/^\d{2}:\d{2}$/),
   players: z.number().int().min(1).max(4),
   primary_contact: z.object({ name: z.string().min(1), phone_e164: E164PhoneSchema }),
