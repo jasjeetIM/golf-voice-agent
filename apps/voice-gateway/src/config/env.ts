@@ -1,19 +1,29 @@
 import { z } from "zod";
 
-export const EnvSchema = z.object({
+const EnvSchema = z.object({
+  PUBLIC_HOST: z.string().default("localhost"),
+  PUBLIC_PROTOCOL: z.enum(["http", "https"]).default("http"),
   VOICE_GATEWAY_PORT: z.coerce.number().default(8080),
-  PUBLIC_BASE_URL: z.string().default("http://localhost:8080"),
-
-  BACKEND_URL: z.string().default("http://localhost:6060"),
-  BACKEND_API_KEY: z.string().default("dev_backend_key"),
-
-  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
-
+  BACKEND_PORT: z.coerce.number().default(8081),
+  PUBLIC_BASE_URL: z.string().optional(),
+  BACKEND_URL: z.string().optional(),
+  OPENAI_API_KEY: z.string().default(""),
+  BACKEND_API_KEY: z.string().default("be_api_key"),
   LOG_LEVEL: z.string().default("info"),
 });
 
-export type Env = z.infer<typeof EnvSchema>;
+export type Env = z.infer<typeof EnvSchema> & {
+  public_voice_url: string;
+  backend_url: string;
+};
 
 export function loadEnv(processEnv: NodeJS.ProcessEnv): Env {
-  return EnvSchema.parse(processEnv);
+  const parsed = EnvSchema.parse(processEnv);
+  const public_voice_url =
+    parsed.PUBLIC_BASE_URL ||
+    `${parsed.PUBLIC_PROTOCOL}://${parsed.PUBLIC_HOST}:${parsed.VOICE_GATEWAY_PORT}`;
+  const backend_url =
+    parsed.BACKEND_URL ||
+    `${parsed.PUBLIC_PROTOCOL}://${parsed.PUBLIC_HOST}:${parsed.BACKEND_PORT}`;
+  return { ...parsed, public_voice_url, backend_url };
 }

@@ -5,7 +5,7 @@ const { Pool } = pg;
 
 // Shared Postgres connection pool
 export const pool = new Pool({
-  connectionString: env.DATABASE_URL,
+  connectionString: env.db_connection_string,
   ssl: env.DB_SSL ? { rejectUnauthorized: false } : undefined,
   max: env.DB_POOL_MAX || 10,
   idleTimeoutMillis: 30_000,

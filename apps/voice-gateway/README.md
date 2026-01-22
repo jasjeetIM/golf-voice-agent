@@ -74,10 +74,9 @@ src/
 All configuration is provided via environment variables.
 
 Common examples:
-- `TWILIO_ACCOUNT_SID`
-- `TWILIO_AUTH_TOKEN`
-- `BACKEND_BASE_URL`
-- `OPENAI_API_KEY`
+- Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
+- Derived (in code): `public_voice_url`, `backend_url`
+- Auth/keys: `OPENAI_API_KEY`, `DB_API_KEY`, `LOG_LEVEL`
 
 No configuration is hardcoded.
 

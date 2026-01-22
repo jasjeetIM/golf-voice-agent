@@ -97,8 +97,9 @@ Quick start (after `pnpm install`):
 - Gateway: `pnpm --filter @golf/voice-gateway run dev`
 
 Dotenv hints:
-- Backend: `PORT`, `DATABASE_URL`, `DB_SSL`, `DB_POOL_MAX`, `API_KEY`, `READ_ONLY`
-- Gateway: `VOICE_GATEWAY_PORT`, `PUBLIC_BASE_URL`, `BACKEND_URL`, `BACKEND_API_KEY`, `OPENAI_API_KEY`, `LOG_LEVEL`
+- Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
+- Gateway: `OPENAI_API_KEY`, `BACKEND_API_KEY`, `LOG_LEVEL` (derives URLs from host/ports)
+- Backend: `DB_CONNECTION_STRING`, `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`, `DB_API_KEY`
 
 For more, see:
 - `apps/voice-gateway/README.md`

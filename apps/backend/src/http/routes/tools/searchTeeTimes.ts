@@ -16,7 +16,7 @@ export function registerSearchTeeTimes(app: FastifyInstance, { inventory }: Deps
       reply: FastifyReply
     ) => {
       const auth = req.headers["authorization"];
-      if (auth !== `Bearer ${env.API_KEY}`) {
+      if (auth !== `Bearer ${env.BACKEND_API_KEY}`) {
         reply.code(401).send({ error: "Unauthorized" });
         return;
       }

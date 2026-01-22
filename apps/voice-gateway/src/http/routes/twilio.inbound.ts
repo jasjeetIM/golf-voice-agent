@@ -10,10 +10,7 @@ export async function inboundHandler(
   reply: FastifyReply,
   env: Env
 ) {
-  const hostHeader = request.headers["host"];
-  const baseUrl = env.PUBLIC_BASE_URL || (hostHeader ? `https://${hostHeader}` : "");
-  const wsUrl = baseUrl.replace(/^http/, "ws") + "/twilio/stream";
-
+  const wsUrl = env.public_voice_url.replace(/^http/, "ws") + "/twilio/stream";
   const twiml = buildConnectStreamTwiML(wsUrl);
   reply.type("text/xml").send(twiml);
 }

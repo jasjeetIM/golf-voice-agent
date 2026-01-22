@@ -14,7 +14,7 @@ export async function createHttpServer(): Promise<FastifyInstance> {
 
   registerToolRoutes(app, { inventory, reservations });
 
-  await app.listen({ host: "0.0.0.0", port: env.PORT });
-  app.log.info(`backend listening on :${env.PORT}`);
+  await app.listen({ host: "0.0.0.0", port: env.BACKEND_PORT });
+  app.log.info(`backend listening on :${env.BACKEND_PORT}`);
   return app;
 }

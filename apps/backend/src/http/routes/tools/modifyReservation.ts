@@ -16,12 +16,12 @@ export function registerModifyReservation(app: FastifyInstance, { reservations }
       reply: FastifyReply
     ) => {
       const auth = req.headers["authorization"];
-      if (auth !== `Bearer ${env.API_KEY}`) {
+      if (auth !== `Bearer ${env.BACKEND_API_KEY}`) {
         reply.code(401).send({ error: "Unauthorized" });
         return;
       }
-      if (env.READ_ONLY) {
-        reply.code(403).send({ error: "Backend is in read-only mode" });
+      if (env.DB_READ_ONLY) {
+        reply.code(403).send({ error: "DB is in read-only mode" });
         return;
       }
 
