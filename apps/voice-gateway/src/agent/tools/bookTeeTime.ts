@@ -9,11 +9,11 @@ import { BackendClient } from "../../integrations/backend/client.js";
 export function bookTeeTimeTool(client: BackendClient) {
   return tool({
     name: "book_tee_time",
-    description: "Book a tee time after confirming date, time, players, and contact.",
-    schema: BookTeeTimeRequestSchema,
-    execute: async (args: BookTeeTimeRequest) => {
-      const result = await client.bookTeeTime(args);
-      return BookTeeTimeResponseSchema.parse(result);
-    },
+    description:
+      "Book a tee time once the caller has confirmed date, time, players, walking/riding preference, and contact info.",
+    parameters: BookTeeTimeRequestSchema,
+    strict: true,
+    execute: async (input: BookTeeTimeRequest) =>
+      BookTeeTimeResponseSchema.parse(await client.bookTeeTime(input)),
   });
 }

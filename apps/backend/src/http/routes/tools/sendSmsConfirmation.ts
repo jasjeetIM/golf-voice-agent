@@ -4,8 +4,11 @@ import {
   SendSmsConfirmationResponseSchema,
 } from "@golf/shared-schemas";
 import { env } from "../../../config/env.js";
+import { ReservationStore } from "apps/backend/src/services/reservations/reservationStore.js";
 
-export function registerSendSmsConfirmation(app: FastifyInstance) {
+type Deps = { reservations: ReservationStore };
+
+export function registerSendSmsConfirmation(app: FastifyInstance, { reservations }: Deps) {
   app.post(
     "/v1/tools/send-sms-confirmation",
     async (

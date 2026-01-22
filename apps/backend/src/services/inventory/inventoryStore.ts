@@ -1,5 +1,16 @@
+import type { PoolClient } from "pg";
 import { SearchTeeTimesRequest, TeeTimeOption } from "@golf/shared-schemas";
 import { pool, withClient } from "../../db/pool.js";
+
+type SlotRow = {
+  slot_id: string;
+  start_ts: Date;
+  capacity_players: number;
+  players_booked: number;
+  base_price_cents: number | null;
+  currency: string | null;
+  rules_json: unknown;
+};
 
 export class InventoryStore {
   async search(req: SearchTeeTimesRequest): Promise<TeeTimeOption[]> {
@@ -23,9 +34,9 @@ export class InventoryStore {
       req.players,
       req.max_results,
     ];
-    const { rows } = await pool.query(sql, params);
+    const { rows } = await pool.query<SlotRow>(sql, params);
 
-    return rows.map((row) => {
+    return rows.map((row: SlotRow) => {
       const start_local = row.start_ts.toISOString().slice(11, 16); // HH:MM
       const base = row.base_price_cents ?? 0;
       return {
@@ -46,7 +57,7 @@ export class InventoryStore {
     });
   }
 
-  async getSlotForUpdate(client: any, slot_id: string) {
+  async getSlotForUpdate(client: PoolClient, slot_id: string) {
     const { rows } = await client.query(
       `SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE`,
       [slot_id]
@@ -54,7 +65,7 @@ export class InventoryStore {
     return rows[0] || null;
   }
 
-  async incrementPlayersBooked(client: any, slot_id: string, players: number) {
+  async incrementPlayersBooked(client: PoolClient, slot_id: string, players: number) {
     const result = await client.query(
       `UPDATE tee_time_slots
        SET players_booked = players_booked + $2, updated_at = now()

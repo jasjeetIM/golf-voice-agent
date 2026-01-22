@@ -9,11 +9,11 @@ import { BackendClient } from "../../integrations/backend/client.js";
 export function searchTeeTimesTool(client: BackendClient) {
   return tool({
     name: "search_tee_times",
-    description: "Search available tee times for a given date and player count.",
-    schema: SearchTeeTimesRequestSchema,
-    execute: async (args: SearchTeeTimesRequest) => {
-      const result = await client.searchTeeTimes(args);
-      return SearchTeeTimesResponseSchema.parse(result);
-    },
+    description:
+      "Search available tee times for a course on a specific date and time window with player count and walking/riding preference.",
+    parameters: SearchTeeTimesRequestSchema,
+    strict: true,
+    execute: async (input: SearchTeeTimesRequest) =>
+      SearchTeeTimesResponseSchema.parse(await client.searchTeeTimes(input)),
   });
 }

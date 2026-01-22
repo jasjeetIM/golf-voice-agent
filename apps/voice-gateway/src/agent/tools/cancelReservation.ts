@@ -9,11 +9,10 @@ import { BackendClient } from "../../integrations/backend/client.js";
 export function cancelReservationTool(client: BackendClient) {
   return tool({
     name: "cancel_reservation",
-    description: "Cancel an existing reservation using the confirmation code.",
-    schema: CancelReservationRequestSchema,
-    execute: async (args: CancelReservationRequest) => {
-      const result = await client.cancelReservation(args);
-      return CancelReservationResponseSchema.parse(result);
-    },
+    description: "Cancel an existing reservation using the confirmation code and the caller's contact confirmation.",
+    parameters: CancelReservationRequestSchema,
+    strict: true,
+    execute: async (input: CancelReservationRequest) =>
+      CancelReservationResponseSchema.parse(await client.cancelReservation(input)),
   });
 }

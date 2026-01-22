@@ -76,7 +76,7 @@ All configuration is provided via environment variables.
 Common examples:
 - Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
 - Derived (in code): `public_voice_url`, `backend_url`
-- Auth/keys: `OPENAI_API_KEY`, `DB_API_KEY`, `LOG_LEVEL`
+- Auth/keys: `OPENAI_API_KEY`, `BACKEND_API_KEY`, `LOG_LEVEL`
 
 No configuration is hardcoded.
 

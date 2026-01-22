@@ -99,7 +99,7 @@ Quick start (after `pnpm install`):
 Dotenv hints:
 - Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
 - Gateway: `OPENAI_API_KEY`, `BACKEND_API_KEY`, `LOG_LEVEL` (derives URLs from host/ports)
-- Backend: `DB_CONNECTION_STRING`, `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`, `DB_API_KEY`
+- Backend: `DB_CONNECTION_STRING`, `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`, `BACKEND_API_KEY`
 
 For more, see:
 - `apps/voice-gateway/README.md`

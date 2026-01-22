@@ -9,7 +9,7 @@ const EnvSchema = z.object({
   DB_SSL: z.coerce.boolean().default(false),
   DB_POOL_MAX: z.coerce.number().optional(),
   DB_READ_ONLY: z.coerce.boolean().default(false),
-  DB_API_KEY: z.string().default("be_api_key"),
+  BACKEND_API_KEY: z.string().default("be_api_key"),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {
@@ -26,6 +26,5 @@ export const env: Env = (() => {
     `${parsed.PUBLIC_PROTOCOL}://${parsed.PUBLIC_HOST}:${port}`;
   const db_connection_string =
     parsed.DB_CONNECTION_STRING || "postgres://localhost:5432/postgres";
-  const api_key = parsed.API_KEY || parsed.DB_API_KEY;
-  return { ...parsed, backend_url, db_connection_string, port, API_KEY: api_key };
+  return { ...parsed, backend_url, db_connection_string, port };
 })();

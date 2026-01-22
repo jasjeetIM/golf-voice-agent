@@ -120,7 +120,7 @@ src/
 Provided via environment variables (see `src/config/env.ts`):
 - Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `BACKEND_PORT` (derives backend_url)
 - DB: `DB_CONNECTION_STRING` (or default postgres://localhost:5432/postgres), `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`
-- Auth: `DB_API_KEY` / `API_KEY` (for tool auth)
+- Auth: `BACKEND_API_KEY` / `API_KEY` (for tool auth)
 
 No secrets are committed to source control.
 

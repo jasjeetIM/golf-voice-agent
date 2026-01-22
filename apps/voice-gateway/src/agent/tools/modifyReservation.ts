@@ -9,11 +9,11 @@ import { BackendClient } from "../../integrations/backend/client.js";
 export function modifyReservationTool(client: BackendClient) {
   return tool({
     name: "modify_reservation",
-    description: "Modify a reservation (time or players) using the confirmation code.",
-    schema: ModifyReservationRequestSchema,
-    execute: async (args: ModifyReservationRequest) => {
-      const result = await client.modifyReservation(args);
-      return ModifyReservationResponseSchema.parse(result);
-    },
+    description:
+      "Modify a reservation (time or player count) using the confirmation code and updated details provided by the caller.",
+    parameters: ModifyReservationRequestSchema,
+    strict: true,
+    execute: async (input: ModifyReservationRequest) =>
+      ModifyReservationResponseSchema.parse(await client.modifyReservation(input)),
   });
 }
