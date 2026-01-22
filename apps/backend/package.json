@@ -1,5 +1,5 @@
 {
-  "name": "@golf/demo-backend",
+  "name": "@golf/backend",
   "private": true,
   "type": "module",
   "main": "dist/index.js",

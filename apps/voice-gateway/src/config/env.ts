@@ -4,8 +4,8 @@ export const EnvSchema = z.object({
   VOICE_GATEWAY_PORT: z.coerce.number().default(8080),
   PUBLIC_BASE_URL: z.string().default("http://localhost:8080"),
 
-  DEMO_BACKEND_URL: z.string().default("http://localhost:8081"),
-  DEMO_API_KEY: z.string().default("dev_demo_key"),
+  BACKEND_URL: z.string().default("http://localhost:6060"),
+  BACKEND_API_KEY: z.string().default("dev_backend_key"),
 
   OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
 

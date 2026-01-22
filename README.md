@@ -1,26 +1,105 @@
-# Golf Voice Agent (Prototype)
+# Golf Voice Agent
 
-A prototype voice agent that answers a phone call (via Twilio Media Streams) and performs golf tee-time actions (search/book/modify/cancel) using a demo backend.
+A real-time voice-based golf reservation system that allows customers to book, modify, and cancel tee times over the phone using a conversational AI agent.
 
-This repo is organized as a **pnpm monorepo** with two services:
-- **voice-gateway**: Twilio webhook + WebSocket for Media Streams + (later) OpenAI realtime voice agent
-- **demo-backend**: deterministic tee-time inventory + reservations API (for a reliable demo)
+The system integrates:
+- Twilio (PSTN + Media Streams)
+- Real-time speech-to-text and text-to-speech
+- A tool-using LLM agent
+- A PostgreSQL-backed reservation system
+- SMS/email confirmations
 
-> Phase 0 goal: basic plumbing works end-to-end (gateway + backend + schemas), with WebSocket logging of Twilio stream events and HTTP endpoints for tee-time workflows.
+The architecture prioritizes **correctness, debuggability, and scalability**, while remaining cloud-native and compliant with 12-factor principles.
+
+---
+
+## High-Level Architecture
+
+Twilio (PSTN + Media Streams)
+|
+v
++-------------------+
+| voice-gateway |
+| (realtime edge) |
++-------------------+
+|
+| HTTP (tool calls)
+v
++-------------------+
+| backend |
+| (domain + DB) |
++-------------------+
+|
+v
+PostgreSQL
+
+### Design Principles
+
+- **Separation of concerns**
+  - Realtime audio + agent orchestration is isolated from database logic
+- **Strong transactional guarantees**
+  - No double booking
+  - Safe retries and idempotency
+- **Observability-first**
+  - Every call and action is traceable
+- **12-factor compliant**
+  - Stateless services
+  - Backing services treated as attached resources
 
 ---
 
-## Architecture (high level)
+## Repository Structure
 
-**Caller → Twilio Voice → Twilio Media Streams (WS) → voice-gateway → (later) OpenAI Realtime Voice Agent → tools → demo-backend**
-
-In Phase 0, we implement:
-- `/twilio/inbound` returns TwiML `<Connect><Stream .../>` so Twilio can stream audio to us
-- `/twilio/stream` accepts a WebSocket and logs Twilio `start/media/mark/stop` events
-- `demo-backend` implements REST tool endpoints:
-  - `search-tee-times`
-  - `book-tee-time`
-  - `modify-reservation`
-  - `cancel-reservation`
+.
+├── apps/
+│ ├── voice-gateway/ # Realtime edge service (Twilio + Agent)
+│ └── backend/ # Domain logic + PostgreSQL
+├── packages/ # Shared types/utilities (if applicable)
+└── README.md
 
 ---
+
+## Services
+
+### voice-gateway
+Handles:
+- Incoming Twilio calls
+- Media streaming via WebSockets
+- STT → LLM → TTS agent loop
+- Tool invocation (HTTP calls to backend)
+
+See: `apps/voice-gateway/README.md`
+
+### backend
+Handles:
+- Reservation and tee-time inventory logic
+- PostgreSQL schema and transactions
+- Audit logs and call observability
+- Notification outbox (SMS/email)
+
+See: `apps/backend/README.md`
+
+---
+
+## Deployment Model
+
+- Each service is independently deployable
+- Scales horizontally
+- No shared in-memory state
+- Environment-variable driven configuration
+
+---
+
+## Getting Started
+
+Quick start (after `pnpm install`):
+- Backend: `pnpm --filter @golf/backend run dev`
+- Gateway: `pnpm --filter @golf/voice-gateway run dev`
+
+Dotenv hints:
+- Backend: `PORT`, `DATABASE_URL`, `DB_SSL`, `DB_POOL_MAX`, `API_KEY`, `READ_ONLY`
+- Gateway: `VOICE_GATEWAY_PORT`, `PUBLIC_BASE_URL`, `BACKEND_URL`, `BACKEND_API_KEY`, `OPENAI_API_KEY`, `LOG_LEVEL`
+
+For more, see:
+- `apps/voice-gateway/README.md`
+- `apps/backend/README.md`
