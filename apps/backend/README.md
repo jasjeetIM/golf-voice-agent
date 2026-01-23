@@ -70,7 +70,8 @@ Used for reliable SMS/email delivery.
 ### Reservations
 - Store only:
   - `start_ts`
-  - `round_type` (`NINE` / `EIGHTEEN`)
+- `num_holes` (9 / 18)
+- `reservation_type` (`WALKING` / `RIDING`)
 - Linked to a tee time slot
 - Never deleted — only canceled
 

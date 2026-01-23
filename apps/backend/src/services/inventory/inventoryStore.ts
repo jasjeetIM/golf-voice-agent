@@ -9,13 +9,12 @@ type SlotRow = {
   players_booked: number;
   base_price_cents: number | null;
   currency: string | null;
-  rules_json: unknown;
 };
 
 export class InventoryStore {
   async search(req: SearchTeeTimesRequest): Promise<TeeTimeOption[]> {
     const sql = `
-      SELECT slot_id, start_ts, capacity_players, players_booked, base_price_cents, currency, rules_json
+      SELECT slot_id, start_ts, capacity_players, players_booked, base_price_cents, currency
       FROM tee_time_slots
       WHERE course_id = $1
         AND start_ts::date = $2::date
@@ -70,6 +69,17 @@ export class InventoryStore {
       `UPDATE tee_time_slots
        SET players_booked = players_booked + $2, updated_at = now()
        WHERE slot_id = $1 AND players_booked + $2 <= capacity_players AND is_closed = FALSE
+       RETURNING *`,
+      [slot_id, players]
+    );
+    return result.rowCount === 1 ? result.rows[0] : null;
+  }
+
+  async decrementPlayersBooked(client: PoolClient, slot_id: string, players: number) {
+    const result = await client.query(
+      `UPDATE tee_time_slots
+       SET players_booked = GREATEST(players_booked - $2, 0), updated_at = now()
+       WHERE slot_id = $1
        RETURNING *`,
       [slot_id, players]
     );

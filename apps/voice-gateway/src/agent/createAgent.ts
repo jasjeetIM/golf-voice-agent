@@ -39,7 +39,12 @@ export function createAgent(opts: AgentOptions): any {
   if (policyRules.forbidPayment) {
     policyTextParts.push("Never ask for payment or credit card details.");
   }
-  const instructions = [systemPrompt, policyTextParts.join(" ")].join("\n");
+  const today = new Date().toISOString().slice(0, 10);
+  const instructions = [
+    `Today is ${today}. Use this to resolve relative dates (e.g., "tomorrow", "next Friday") into ISO dates.`,
+    systemPrompt,
+    policyTextParts.join(" "),
+  ].join("\n");
 
   return new RealtimeAgent({
     apiKey: opts.apiKey,

@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { ReservationSchema, E164PhoneSchema } from "../domain/reservation.js";
+import {
+  ReservationSchema,
+  E164PhoneSchema,
+  NumHolesSchema,
+  ReservationTypeSchema,
+} from "../domain/reservation.js";
 
 export const BookTeeTimeRequestSchema = z.object({
   idempotency_key: z.string().min(1),
@@ -9,6 +14,8 @@ export const BookTeeTimeRequestSchema = z.object({
     phone_e164: E164PhoneSchema,
   }),
   players: z.number().int().min(1).max(4),
+   num_holes: NumHolesSchema,
+   reservation_type: ReservationTypeSchema,
 });
 
 export const BookTeeTimeResponseSchema = z.object({

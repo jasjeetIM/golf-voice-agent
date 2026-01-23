@@ -10,7 +10,7 @@ export function searchTeeTimesTool(client: BackendClient) {
   return tool({
     name: "search_tee_times",
     description:
-      "Search available tee times for a course on a specific date and time window with player count and walking/riding preference.",
+      "Search available tee times for a course on a specific date and time window with player count and WALKING/RIDING preference.",
     parameters: SearchTeeTimesRequestSchema,
     strict: true,
     execute: async (input: SearchTeeTimesRequest) =>

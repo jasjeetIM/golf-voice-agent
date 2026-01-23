@@ -7,7 +7,8 @@ export const ModifyReservationRequestSchema = z.object({
   changes: z.object({
     start_local: z.string().regex(/^\d{2}:\d{2}$/).optional(),
     players: z.number().int().min(1).max(4).optional(),
-  }).refine((obj) => obj.start_local !== undefined || obj.players !== undefined, {
+    reservation_type: z.enum(["WALKING", "RIDING", "walking", "riding"]).optional(),
+  }).refine((obj) => obj.start_local !== undefined || obj.players !== undefined || obj.reservation_type !== undefined, {
     message: "At least one change is required",
   }),
 });

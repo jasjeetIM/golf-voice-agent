@@ -9,14 +9,20 @@ export const ReservationStatusSchema = z.enum([
     "CANCELLED",
 ]);
 
+export const NumHolesSchema = z.union([z.literal(9), z.literal(18)]);
+export const ReservationTypeSchema = z.enum(["WALKING", "RIDING"]);
+
 export const ReservationSchema = z.object({
   reservation_id: z.string(),
   confirmation_code: z.string(),
   status: ReservationStatusSchema,
   course_id: CourseIdSchema,
+  slot_id: z.string(),
   date: DateSchema,
   start_local: z.string().regex(/^\d{2}:\d{2}$/),
   players: z.number().int().min(1).max(4),
+  num_holes: NumHolesSchema,
+  reservation_type: ReservationTypeSchema,
   primary_contact: z.object({ name: z.string().min(1), phone_e164: E164PhoneSchema }),
   created_at: z.string(),
   updated_at: z.string().optional(),

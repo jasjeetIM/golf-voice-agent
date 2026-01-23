@@ -65,10 +65,18 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
           const confirmation_code = makeConfirmationCode("RES");
           const resInsert = await client.query(
             `INSERT INTO reservations
-             (course_id, slot_id, customer_id, start_ts, round_type, party_size, status, created_by_call_id)
-             VALUES ($1,$2,$3,$4,'EIGHTEEN',$5,'BOOKED', NULL)
+             (course_id, slot_id, customer_id, start_ts, num_holes, reservation_type, num_players, status, created_by_call_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'BOOKED', NULL)
              RETURNING reservation_id, created_at, updated_at`,
-            [slot.course_id, parsed.data.slot_id, customer_id, start_ts, parsed.data.players]
+            [
+              slot.course_id,
+              parsed.data.slot_id,
+              customer_id,
+              start_ts,
+              parsed.data.num_holes,
+              parsed.data.reservation_type,
+              parsed.data.players,
+            ]
           );
           const reservation_id = resInsert.rows[0].reservation_id;
 
@@ -86,6 +94,8 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
             course_id: slot.course_id,
             date: start_ts.slice(0, 10),
             start_local: start_ts.slice(11, 16),
+            num_holes: parsed.data.num_holes,
+            reservation_type: parsed.data.reservation_type,
             players: parsed.data.players,
             primary_contact: parsed.data.primary_contact,
             created_at: resInsert.rows[0].created_at.toISOString(),

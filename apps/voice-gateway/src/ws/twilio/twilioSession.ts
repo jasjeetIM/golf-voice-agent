@@ -18,7 +18,7 @@ export function handleTwilioSession(ws: WebSocket, _req: IncomingMessage) {
     model: "gpt-4o-realtime-preview-2024-12-17",
     backendBaseUrl: env.backend_url,
     backendApiKey: env.BACKEND_API_KEY,
-    voice: { name: "alloy" },
+    voice: { name: "cove" },
     turnDetection: { type: "server_vad" },
   });
 

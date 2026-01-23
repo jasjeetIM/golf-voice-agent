@@ -20,7 +20,7 @@ export const SearchTeeTimesRequestSchema = z.object({
   time_window: TimeWindowSchema,
   players: z.number().int().min(1).max(4),
   holes: z.union([z.literal(9), z.literal(18)]).default(18),
-  walking_preference: z.enum(["walking", "riding", "either"]).default("either"),
+  WALKING_preference: z.enum(["WALKING", "RIDING", "either"]).default("either"),
   max_results: z.number().int().min(1).max(10).default(5),
 });
 

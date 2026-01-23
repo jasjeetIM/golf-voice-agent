@@ -10,3 +10,7 @@ export * from "./tools/bookTeeTime.js";
 export * from "./tools/modifyReservation.js";
 export * from "./tools/cancelReservation.js";
 export * from "./tools/sendSmsConfirmation.js";
+export * from "./tools/getReservationDetails.js";
+export * from "./tools/listAvailableSlots.js";
+export * from "./tools/quoteReservationChange.js";
+export * from "./tools/checkSlotCapacity.js";
