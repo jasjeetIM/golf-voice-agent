@@ -122,9 +122,28 @@ Provided via environment variables (see `src/config/env.ts`):
 - Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `BACKEND_PORT` (derives backend_url)
 - DB: `DB_CONNECTION_STRING` (or default postgres://localhost:5432/postgres), `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`
 - Auth: `BACKEND_API_KEY` / `API_KEY` (for tool auth)
+- Seeding: `SLOT_INTERVAL_MINUTES`, `TEE_TIME_START_HOUR`, `TEE_TIME_END_HOUR`, `FORWARD_OPEN_TEE_TIME_DAYS`
 
 No secrets are committed to source control.
 
+## Database setup
+
+Run migrations then seed initial slots:
+
+```
+# load env (POSIX)
+set -a; [ -f .env ] && . ./.env; set +a
+
+# migrate
+pnpm --filter @golf/backend run migrate
+
+# seed tee_time_slots for course 0
+pnpm --filter @golf/backend run seed
+```
+
+The migrate script runs `psql "$DB_CONNECTION_STRING" -f src/db/migrations/0001_init.sql`. The seed script upserts slots with configurable seeding values: `SLOT_INTERVAL_MINUTES`, `TEE_TIME_START_HOUR`, `TEE_TIME_END_HOUR`, `FORWARD_OPEN_TEE_TIME_DAYS`. 
+
+Ensure `psql` is in the PATH and `.env` defines `DB_CONNECTION_STRING`.
 ---
 
 ## Scaling Characteristics

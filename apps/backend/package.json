@@ -3,14 +3,16 @@
   "private": true,
   "type": "module",
   "main": "dist/index.js",
-   "scripts": {
+  "scripts": {
     "build": "tsup",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "dev": "tsx watch src/index.ts",
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "test": "pnpm run test:unit && npm run test:typescript",
-    "test:typescript": "tsd"
+    "test:typescript": "tsd",
+    "migrate": "psql \"$DB_CONNECTION_STRING\" -f src/db/migrations/0001_init.sql",
+    "seed": "tsx scripts/seedSlots.ts"
   },
   "dependencies": {
     "@golf/shared-schemas": "workspace:*",

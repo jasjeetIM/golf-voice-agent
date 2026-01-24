@@ -10,6 +10,10 @@ const EnvSchema = z.object({
   DB_POOL_MAX: z.coerce.number().optional(),
   DB_READ_ONLY: z.coerce.boolean().default(false),
   BACKEND_API_KEY: z.string().default("be_api_key"),
+  SLOT_INTERVAL_MINUTES: z.coerce.number().default(12),
+  TEE_TIME_START_HOUR: z.coerce.number().min(5).max(21).default(7),
+  TEE_TIME_END_HOUR: z.coerce.number().min(5).max(21).default(15),
+  FORWARD_OPEN_TEE_TIME_DAYS: z.coerce.number().min(1).max(30).default(14),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

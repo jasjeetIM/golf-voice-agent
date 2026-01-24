@@ -37,7 +37,14 @@ export function registerModifyReservation(app: FastifyInstance, { reservations }
         return;
       }
 
-      const updated = await reservations.modify(parsed.data.confirmation_code, parsed.data.changes);
+      const normalizedChanges = {
+        ...parsed.data.changes,
+        reservation_type: parsed.data.changes.reservation_type
+          ? parsed.data.changes.reservation_type.toUpperCase() as "WALKING" | "RIDING"
+          : undefined,
+      };
+
+      const updated = await reservations.modify(parsed.data.confirmation_code, normalizedChanges);
       if (!updated) {
         reply.code(404).send({ error: "Reservation not found" });
         return;
