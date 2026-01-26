@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export const CheckSlotCapacityRequestSchema = z.object({
   slot_id: z.string().min(1),

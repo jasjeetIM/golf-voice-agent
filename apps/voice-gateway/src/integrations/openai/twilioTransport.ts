@@ -1,5 +1,5 @@
-import { TwilioRealtimeTransportLayer } from "@openai/agents-extensions";
-import type WebSocket from "ws";
+import { TwilioRealtimeTransportLayer } from '@openai/agents-extensions';
+import type WebSocket from 'ws';
 
 // Wrap the OpenAI extension that bridges Twilio Media Streams to Realtime
 export function createTwilioTransport(connection: WebSocket) {

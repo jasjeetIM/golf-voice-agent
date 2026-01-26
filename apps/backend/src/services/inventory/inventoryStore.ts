@@ -1,6 +1,6 @@
-import type { PoolClient } from "pg";
-import { SearchTeeTimesRequest, TeeTimeOption } from "@golf/shared-schemas";
-import { pool, withClient } from "../../db/pool.js";
+import type { PoolClient } from 'pg';
+import { SearchTeeTimesRequest, TeeTimeOption } from '@golf/shared-schemas';
+import { pool, withClient } from '../../db/pool.js';
 
 type SlotRow = {
   slot_id: string;
@@ -44,13 +44,13 @@ export class InventoryStore {
         duration_min: 240,
         players_allowed: [1, 2, 3, 4].filter((p) => p + row.players_booked <= row.capacity_players),
         price: {
-          currency: row.currency || "USD",
+          currency: row.currency || 'USD',
           amount_per_player: base / 100,
           amount_total: (base / 100) * req.players,
         },
         constraints: {
           cart_required: false,
-          cancellation_policy: "Cancel >= 24h to avoid fee",
+          cancellation_policy: 'Cancel >= 24h to avoid fee',
         },
       } satisfies TeeTimeOption;
     });

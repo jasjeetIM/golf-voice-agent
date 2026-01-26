@@ -1,5 +1,5 @@
 // packages/shared-schemas/src/twilio/mediaStream.ts
-import { z } from "zod";
+import { z } from 'zod';
 
 /**
  * Twilio Media Streams message schema.
@@ -11,7 +11,7 @@ import { z } from "zod";
  */
 
 export const TwilioStartEventSchema = z.object({
-  event: z.literal("start"),
+  event: z.literal('start'),
   start: z.object({
     callSid: z.string(),
     streamSid: z.string(),
@@ -20,22 +20,22 @@ export const TwilioStartEventSchema = z.object({
 });
 
 export const TwilioMediaEventSchema = z.object({
-  event: z.literal("media"),
+  event: z.literal('media'),
   media: z.object({
     payload: z.string(), // base64 audio
-    track: z.enum(["inbound", "outbound"]).optional(),
+    track: z.enum(['inbound', 'outbound']).optional(),
   }),
 });
 
 export const TwilioMarkEventSchema = z.object({
-  event: z.literal("mark"),
+  event: z.literal('mark'),
   mark: z.object({
     name: z.string(),
   }),
 });
 
 export const TwilioStopEventSchema = z.object({
-  event: z.literal("stop"),
+  event: z.literal('stop'),
   stop: z.object({}).passthrough().optional(),
 });
 

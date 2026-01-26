@@ -1,16 +1,15 @@
 // Domain types placeholder
-import { z } from "zod";
-import { CourseIdSchema } from "./course.js";
-import { DateSchema } from "./date.js";
+import { z } from 'zod';
+import { CourseIdSchema } from './course.js';
+import { DateSchema } from './date.js';
 
-export const E164PhoneSchema = z.string().regex(/^\+\d{8,15}$/, "Expected E.164 phone number like +13361117999");
-export const ReservationStatusSchema = z.enum([
-    "CONFIRMED", 
-    "CANCELLED",
-]);
+export const E164PhoneSchema = z
+  .string()
+  .regex(/^\+\d{8,15}$/, 'Expected E.164 phone number like +13361117999');
+export const ReservationStatusSchema = z.enum(['CONFIRMED', 'CANCELLED']);
 
 export const NumHolesSchema = z.union([z.literal(9), z.literal(18)]);
-export const ReservationTypeSchema = z.enum(["WALKING", "RIDING"]);
+export const ReservationTypeSchema = z.enum(['WALKING', 'RIDING']);
 
 export const ReservationSchema = z.object({
   reservation_id: z.string(),
@@ -28,7 +27,6 @@ export const ReservationSchema = z.object({
   updated_at: z.string().optional(),
   cancelled_at: z.string().optional(),
 });
-
 
 export type Reservation = z.infer<typeof ReservationSchema>;
 export type ReservationStatus = z.infer<typeof ReservationStatusSchema>;

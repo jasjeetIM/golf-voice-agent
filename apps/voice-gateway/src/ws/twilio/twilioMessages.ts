@@ -1,7 +1,7 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 const startEventSchema = z.object({
-  event: z.literal("start"),
+  event: z.literal('start'),
   start: z.object({
     accountSid: z.string(),
     streamSid: z.string(),
@@ -20,7 +20,7 @@ const startEventSchema = z.object({
 });
 
 const mediaEventSchema = z.object({
-  event: z.literal("media"),
+  event: z.literal('media'),
   streamSid: z.string(),
   media: z.object({
     payload: z.string(),
@@ -31,7 +31,7 @@ const mediaEventSchema = z.object({
 });
 
 const markEventSchema = z.object({
-  event: z.literal("mark"),
+  event: z.literal('mark'),
   streamSid: z.string(),
   mark: z.object({
     name: z.string(),
@@ -40,7 +40,7 @@ const markEventSchema = z.object({
 });
 
 const stopEventSchema = z.object({
-  event: z.literal("stop"),
+  event: z.literal('stop'),
   streamSid: z.string().optional(),
   stop: z.object({
     accountSid: z.string().optional(),
@@ -49,7 +49,7 @@ const stopEventSchema = z.object({
   }),
 });
 
-const twilioMessageSchema = z.discriminatedUnion("event", [
+const twilioMessageSchema = z.discriminatedUnion('event', [
   startEventSchema,
   mediaEventSchema,
   markEventSchema,

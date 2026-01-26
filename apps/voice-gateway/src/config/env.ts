@@ -1,15 +1,15 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 const EnvSchema = z.object({
-  PUBLIC_HOST: z.string().default("localhost"),
-  PUBLIC_PROTOCOL: z.enum(["http", "https"]).default("http"),
+  PUBLIC_HOST: z.string().default('localhost'),
+  PUBLIC_PROTOCOL: z.enum(['http', 'https']).default('http'),
   VOICE_GATEWAY_PORT: z.coerce.number().default(8080),
   BACKEND_PORT: z.coerce.number().default(8081),
   PUBLIC_BASE_URL: z.string().optional(),
   BACKEND_URL: z.string().optional(),
-  OPENAI_API_KEY: z.string().default(""),
-  BACKEND_API_KEY: z.string().default("be_api_key"),
-  LOG_LEVEL: z.string().default("info"),
+  OPENAI_API_KEY: z.string().default(''),
+  BACKEND_API_KEY: z.string().default('be_api_key'),
+  LOG_LEVEL: z.string().default('info'),
 });
 
 export type Env = z.infer<typeof EnvSchema> & {

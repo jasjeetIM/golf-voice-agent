@@ -1,4 +1,4 @@
-import { request } from "undici";
+import { request } from 'undici';
 import {
   SearchTeeTimesRequest,
   SearchTeeTimesResponseSchema,
@@ -15,7 +15,16 @@ import {
   SendSmsConfirmationRequest,
   SendSmsConfirmationRequestSchema,
   SendSmsConfirmationResponseSchema,
-} from "@golf/shared-schemas";
+  GetReservationDetailsRequest,
+  GetReservationDetailsRequestSchema,
+  GetReservationDetailsResponseSchema,
+  QuoteReservationChangeRequest,
+  QuoteReservationChangeRequestSchema,
+  QuoteReservationChangeResponseSchema,
+  CheckSlotCapacityRequest,
+  CheckSlotCapacityRequestSchema,
+  CheckSlotCapacityResponseSchema,
+} from '@golf/shared-schemas';
 
 export type BackendClientConfig = {
   baseUrl: string;
@@ -32,9 +41,9 @@ export class BackendClient {
   ): Promise<T> {
     const url = `${this.cfg.baseUrl}${path}`;
     const res = await request(url, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "content-type": "application/json",
+        'content-type': 'application/json',
         authorization: `Bearer ${this.cfg.apiKey}`,
       },
       body: JSON.stringify(body),
@@ -51,26 +60,65 @@ export class BackendClient {
 
   async searchTeeTimes(req: SearchTeeTimesRequest) {
     const validated = SearchTeeTimesRequestSchema.parse(req);
-    return this.postAndParse("/v1/tools/search-tee-times", validated, SearchTeeTimesResponseSchema);
+    return this.postAndParse('/v1/tools/search-tee-times', validated, SearchTeeTimesResponseSchema);
   }
 
   async bookTeeTime(req: BookTeeTimeRequest) {
     const validated = BookTeeTimeRequestSchema.parse(req);
-    return this.postAndParse("/v1/tools/book-tee-time", validated, BookTeeTimeResponseSchema);
+    return this.postAndParse('/v1/tools/book-tee-time', validated, BookTeeTimeResponseSchema);
   }
 
   async modifyReservation(req: ModifyReservationRequest) {
     const validated = ModifyReservationRequestSchema.parse(req);
-    return this.postAndParse("/v1/tools/modify-reservation", validated, ModifyReservationResponseSchema);
+    return this.postAndParse(
+      '/v1/tools/modify-reservation',
+      validated,
+      ModifyReservationResponseSchema
+    );
   }
 
   async cancelReservation(req: CancelReservationRequest) {
     const validated = CancelReservationRequestSchema.parse(req);
-    return this.postAndParse("/v1/tools/cancel-reservation", validated, CancelReservationResponseSchema);
+    return this.postAndParse(
+      '/v1/tools/cancel-reservation',
+      validated,
+      CancelReservationResponseSchema
+    );
   }
 
   async sendSmsConfirmation(req: SendSmsConfirmationRequest) {
     const validated = SendSmsConfirmationRequestSchema.parse(req);
-    return this.postAndParse("/v1/tools/send-sms-confirmation", validated, SendSmsConfirmationResponseSchema);
+    return this.postAndParse(
+      '/v1/tools/send-sms-confirmation',
+      validated,
+      SendSmsConfirmationResponseSchema
+    );
+  }
+
+  async getReservationDetails(req: GetReservationDetailsRequest) {
+    const validated = GetReservationDetailsRequestSchema.parse(req);
+    return this.postAndParse(
+      '/v1/tools/get-reservation-details',
+      validated,
+      GetReservationDetailsResponseSchema
+    );
+  }
+
+  async quoteReservationChange(req: QuoteReservationChangeRequest) {
+    const validated = QuoteReservationChangeRequestSchema.parse(req);
+    return this.postAndParse(
+      '/v1/tools/quote-reservation-change',
+      validated,
+      QuoteReservationChangeResponseSchema
+    );
+  }
+
+  async checkSlotCapacity(req: CheckSlotCapacityRequest) {
+    const validated = CheckSlotCapacityRequestSchema.parse(req);
+    return this.postAndParse(
+      '/v1/tools/check-slot-capacity',
+      validated,
+      CheckSlotCapacityResponseSchema
+    );
   }
 }

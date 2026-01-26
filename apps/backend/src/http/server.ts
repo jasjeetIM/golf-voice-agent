@@ -1,8 +1,8 @@
-import Fastify, { FastifyInstance } from "fastify";
-import { env } from "../config/env.js";
-import { registerToolRoutes } from "./routes/tools/index.js";
-import { InventoryStore } from "../services/inventory/inventoryStore.js";
-import { ReservationStore } from "../services/reservations/reservationStore.js";
+import Fastify, { FastifyInstance } from 'fastify';
+import { env } from '../config/env.js';
+import { registerToolRoutes } from './routes/tools/index.js';
+import { InventoryStore } from '../services/inventory/inventoryStore.js';
+import { ReservationStore } from '../services/reservations/reservationStore.js';
 
 export async function createHttpServer(): Promise<FastifyInstance> {
   const app = Fastify({ logger: true });
@@ -10,11 +10,11 @@ export async function createHttpServer(): Promise<FastifyInstance> {
   const inventory = new InventoryStore();
   const reservations = new ReservationStore();
 
-  app.get("/health", async () => ({ status: "ok", service: "backend" }));
+  app.get('/health', async () => ({ status: 'ok', service: 'backend' }));
 
   registerToolRoutes(app, { inventory, reservations });
 
-  await app.listen({ host: "0.0.0.0", port: env.BACKEND_PORT });
+  await app.listen({ host: '0.0.0.0', port: env.BACKEND_PORT });
   app.log.info(`backend listening on :${env.BACKEND_PORT}`);
   return app;
 }

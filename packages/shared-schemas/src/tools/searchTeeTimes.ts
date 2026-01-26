@@ -1,18 +1,18 @@
 // packages/shared-schemas/src/tools/searchTeeTimes.ts
-import { z } from "zod";
-import { MoneySchema } from "../domain/money.js";
-import { CourseIdSchema } from "../domain/course.js";
-import { DateSchema } from "../domain/date.js";
+import { z } from 'zod';
+import { MoneySchema } from '../domain/money.js';
+import { CourseIdSchema } from '../domain/course.js';
+import { DateSchema } from '../domain/date.js';
+import { ReservationTypeSchema } from '../domain/reservation.js';
 
-export const TimeWindowSchema = z.object({
-  start_local: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM"),
-  end_local: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM"),
-}).refine(
-  (tw) => tw.start_local < tw.end_local,
-  {
-    message: "start_local must be before end_local."
-  }
-);
+export const TimeWindowSchema = z
+  .object({
+    start_local: z.string().regex(/^\d{2}:\d{2}$/, 'Expected HH:MM'),
+    end_local: z.string().regex(/^\d{2}:\d{2}$/, 'Expected HH:MM'),
+  })
+  .refine((tw) => tw.start_local < tw.end_local, {
+    message: 'start_local must be before end_local.',
+  });
 
 export const SearchTeeTimesRequestSchema = z.object({
   course_id: CourseIdSchema,
@@ -20,7 +20,7 @@ export const SearchTeeTimesRequestSchema = z.object({
   time_window: TimeWindowSchema,
   players: z.number().int().min(1).max(4),
   holes: z.union([z.literal(9), z.literal(18)]).default(18),
-  WALKING_preference: z.enum(["WALKING", "RIDING", "either"]).default("either"),
+  reservation_type: ReservationTypeSchema,
   max_results: z.number().int().min(1).max(10).default(5),
 });
 

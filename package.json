@@ -9,10 +9,13 @@
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "test": "pnpm run test:unit && npm run test:typescript",
-    "test:typescript": "tsd"
+    "test:typescript": "tsd",
+    "format": "prettier --write \"**/*.{js,ts,tsx,json,md}\"",
+    "format:check": "prettier --check \"**/*.{js,ts,tsx,json,md}\""
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
+    "prettier": "^3.8.1",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0"
   },

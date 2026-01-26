@@ -1,23 +1,20 @@
-import dotenv from "dotenv";
-import pg from "pg";
-import { env } from "../src/config/env.js"; 
+import dotenv from 'dotenv';
+import pg from 'pg';
+import { env } from '../src/config/env.js';
 
-
-const connectionString =
-  env.DB_CONNECTION_STRING ||
-  "postgres://localhost:5432/postgres";
+const connectionString = env.DB_CONNECTION_STRING || 'postgres://localhost:5432/postgres';
 
 async function main() {
   const pool = new pg.Pool({ connectionString });
   try {
-    await pool.query("BEGIN");
+    await pool.query('BEGIN');
 
     // Ensure course exists
     await pool.query(
       `INSERT INTO courses (course_id, course_name, timezone)
        VALUES ($1, $2, $3)
        ON CONFLICT (course_id) DO NOTHING`,
-      ["0", "Demo Course 0", "America/New_York"]
+      ['0', 'Demo Course 0', 'America/New_York']
     );
 
     const startMinutes = env.TEE_TIME_START_HOUR * 60; // start
@@ -50,16 +47,18 @@ async function main() {
            ON CONFLICT (course_id, start_ts) DO UPDATE
              SET base_price_cents = EXCLUDED.base_price_cents,
                  updated_at = now()`,
-          ["0", slot.start.toISOString(), 4, slot.priceCents]
+          ['0', slot.start.toISOString(), 4, slot.priceCents]
         );
       }
       total += slots.length;
     }
 
-    await pool.query("COMMIT");
-    console.log(`Inserted/updated ${total} slots for course 0 over the next 14 days (${env.TEE_TIME_START_HOUR}am-${env.TEE_TIME_END_HOUR}pm, ${intervalMinutes}-min cadence).`);
+    await pool.query('COMMIT');
+    console.log(
+      `Inserted/updated ${total} slots for course 0 over the next 14 days (${env.TEE_TIME_START_HOUR}am-${env.TEE_TIME_END_HOUR}pm, ${intervalMinutes}-min cadence).`
+    );
   } catch (err) {
-    await pool.query("ROLLBACK");
+    await pool.query('ROLLBACK');
     console.error(err);
     process.exitCode = 1;
   } finally {

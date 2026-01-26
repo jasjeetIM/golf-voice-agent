@@ -3,6 +3,7 @@
 The **voice-gateway** is the realtime edge service for the Golf Voice Agent.
 
 It handles:
+
 - Incoming phone calls from Twilio
 - WebSocket media streams
 - Running the conversational AI agent
@@ -15,6 +16,7 @@ This service is **latency-sensitive** and **stateless** by design.
 ## Responsibilities
 
 ### What this service does
+
 - Accepts Twilio webhooks for inbound calls
 - Establishes Twilio Media Streams (WebSocket)
 - Runs the STT → LLM → TTS loop
@@ -22,7 +24,8 @@ This service is **latency-sensitive** and **stateless** by design.
 - Calls backend tools to perform business actions
 - Emits call events for observability
 
-### What this service does *not* do
+### What this service does _not_ do
+
 - No direct database access
 - No business rule enforcement
 - No reservation correctness logic
@@ -34,7 +37,9 @@ All persistent state lives in the backend service.
 ## Key Concepts
 
 ### Agent Session
+
 Each call creates an isolated agent session that:
+
 - Maintains conversational context
 - Decides which tools to invoke
 - Streams audio responses back to the caller
@@ -42,7 +47,9 @@ Each call creates an isolated agent session that:
 Session state is **in-memory only** and discarded when the call ends.
 
 ### Tool Invocation
+
 The agent interacts with the backend exclusively via tools, such as:
+
 - `bookTeeTime`
 - `modifyReservation`
 - `cancelReservation`
@@ -55,17 +62,17 @@ Tools are HTTP APIs implemented by the backend.
 ## Directory Structure
 
 src/
-├── agent/             # Agent configuration, prompts, tools, guardrails
-├── config/            # Env parsing, constants
-├── http/              # Fastify server + routes (Twilio inbound, health)
-│   └── routes/
-├── ws/                # WebSocket handling (Twilio Media Streams)
-│   └── twilio/
-├── integrations/      # Backend HTTP client, OpenAI transport
-│   └── backend/
-├── observability/     # Logging/tracing hooks
-├── utils/             # IDs, time, phone helpers
-└── index.ts           # Bootstrap
+├── agent/ # Agent configuration, prompts, tools, guardrails
+├── config/ # Env parsing, constants
+├── http/ # Fastify server + routes (Twilio inbound, health)
+│ └── routes/
+├── ws/ # WebSocket handling (Twilio Media Streams)
+│ └── twilio/
+├── integrations/ # Backend HTTP client, OpenAI transport
+│ └── backend/
+├── observability/ # Logging/tracing hooks
+├── utils/ # IDs, time, phone helpers
+└── index.ts # Bootstrap
 
 ---
 
@@ -74,6 +81,7 @@ src/
 All configuration is provided via environment variables.
 
 Common examples:
+
 - Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
 - Derived (in code): `public_voice_url`, `backend_url`
 - Auth/keys: `OPENAI_API_KEY`, `BACKEND_API_KEY`, `LOG_LEVEL`
@@ -102,6 +110,7 @@ No configuration is hardcoded.
 ## Why No Database Here?
 
 Keeping the gateway DB-free:
+
 - Reduces blast radius
 - Keeps latency predictable
 - Simplifies scaling

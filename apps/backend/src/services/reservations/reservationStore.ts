@@ -1,13 +1,13 @@
-import { Reservation } from "@golf/shared-schemas";
-import { pool } from "../../db/pool.js";
-import { withTransaction } from "../../db/tx.js";
-import { makeConfirmationCode } from "./confirmationCode.js";
+import { Reservation } from '@golf/shared-schemas';
+import { pool } from '../../db/pool.js';
+import { withTransaction } from '../../db/tx.js';
+import { makeConfirmationCode } from './confirmationCode.js';
 
 export type CreateReservationInput = {
   idempotency_key: string;
   slot_id: string;
   num_holes: 9 | 18;
-  reservation_type: "WALKING" | "RIDING";
+  reservation_type: 'WALKING' | 'RIDING';
   players: number;
   customer_id: string;
 };
@@ -28,17 +28,17 @@ export class ReservationStore {
     return {
       reservation_id: row.reservation_id,
       confirmation_code: row.confirmation_code,
-      status: row.status === "BOOKED" ? "CONFIRMED" : "CANCELLED",
+      status: row.status === 'BOOKED' ? 'CONFIRMED' : 'CANCELLED',
       course_id: row.course_id,
       date: row.date,
       start_local: row.start_local,
       num_holes: row.num_holes,
       reservation_type: row.reservation_type,
       players: row.num_players,
-      primary_contact: { name: "", phone_e164: "" },
+      primary_contact: { name: '', phone_e164: '' },
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at?.toISOString(),
-      cancelled_at: row.status === "CANCELLED" ? row.updated_at?.toISOString() : undefined,
+      cancelled_at: row.status === 'CANCELLED' ? row.updated_at?.toISOString() : undefined,
     } as Reservation;
   }
 
@@ -61,7 +61,7 @@ export class ReservationStore {
       }
 
       // Insert reservation
-      const confirmation_code = makeConfirmationCode("RES");
+      const confirmation_code = makeConfirmationCode('RES');
       const resInsert = await client.query(
         `INSERT INTO reservations
          (confirmation_code, slot_id, customer_id, num_holes, reservation_type, num_players, status)
@@ -101,7 +101,7 @@ export class ReservationStore {
 
   async modify(
     confirmation_code: string,
-    changes: Partial<{ start_ts: string; players: number; reservation_type: "WALKING" | "RIDING"}>
+    changes: Partial<{ start_ts: string; players: number; reservation_type: 'WALKING' | 'RIDING' }>
   ): Promise<Reservation | null> {
     return withTransaction(async (client) => {
       const existing = await this.findByConfirmation(confirmation_code);
@@ -111,7 +111,7 @@ export class ReservationStore {
       const currentSlot = await client
         .query(`SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE`, [existing.slot_id])
         .then((r) => r.rows[0]);
-      if (!currentSlot) throw new Error("Current slot not found");
+      if (!currentSlot) throw new Error('Current slot not found');
 
       // Track which slot is active after potential move
       let activeSlotId = currentSlot.slot_id;
@@ -124,9 +124,9 @@ export class ReservationStore {
           [currentSlot.course_id, changes.start_ts]
         );
         const targetSlot = target.rows[0];
-        if (!targetSlot || targetSlot.is_closed) throw new Error("Requested time unavailable");
+        if (!targetSlot || targetSlot.is_closed) throw new Error('Requested time unavailable');
         if (targetSlot.players_booked + currentPlayers > targetSlot.capacity_players) {
-          throw new Error("Requested time lacks capacity");
+          throw new Error('Requested time lacks capacity');
         }
         // free current slot
         await client.query(
@@ -155,10 +155,10 @@ export class ReservationStore {
         const slotRow = await client
           .query(`SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE`, [activeSlotId])
           .then((r) => r.rows[0]);
-        if (!slotRow) throw new Error("Slot not found");
+        if (!slotRow) throw new Error('Slot not found');
         if (delta > 0) {
           if (slotRow.players_booked + delta > slotRow.capacity_players || slotRow.is_closed) {
-            throw new Error("Not enough capacity for additional players");
+            throw new Error('Not enough capacity for additional players');
           }
         }
         await client.query(
@@ -178,10 +178,7 @@ export class ReservationStore {
 
       // update_type: change walking/riding
       if (changes.reservation_type) {
-        const normalizedType =
-           changes.reservation_type === "WALKING"
-            ? "WALKING"
-            : "RIDING";
+        const normalizedType = changes.reservation_type === 'WALKING' ? 'WALKING' : 'RIDING';
         await client.query(
           `UPDATE reservations
            SET reservation_type = $1, version = version + 1, updated_at = now()
@@ -193,10 +190,10 @@ export class ReservationStore {
       // Log change
       const changeType =
         changes.start_ts !== undefined
-          ? "UPDATE_TIME"
+          ? 'UPDATE_TIME'
           : changes.players !== undefined
-            ? "UPDATE_PLAYERS"
-            : "UPDATE_ROUND_TYPE";
+            ? 'UPDATE_PLAYERS'
+            : 'UPDATE_ROUND_TYPE';
       await client.query(
         `INSERT INTO reservation_changes (reservation_id, change_type, after_json)
          SELECT reservation_id, $1, $2 FROM reservations WHERE confirmation_code = $3`,
@@ -227,8 +224,8 @@ export class ReservationStore {
   private rowToReservation(row: any): Reservation {
     return {
       reservation_id: row.reservation_id,
-      confirmation_code: row.confirmation_code ?? makeConfirmationCode("RES"),
-      status: row.status === "BOOKED" ? "CONFIRMED" : "CANCELLED",
+      confirmation_code: row.confirmation_code ?? makeConfirmationCode('RES'),
+      status: row.status === 'BOOKED' ? 'CONFIRMED' : 'CANCELLED',
       course_id: row.course_id,
       slot_id: row.slot_id,
       date: row.date,
@@ -236,10 +233,10 @@ export class ReservationStore {
       players: row.num_players,
       num_holes: row.num_holes,
       reservation_type: row.reservation_type,
-      primary_contact: { name: "", phone_e164: "" },
+      primary_contact: { name: '', phone_e164: '' },
       created_at: row.created_at.toISOString(),
       updated_at: row.updated_at?.toISOString(),
-      cancelled_at: row.status === "CANCELLED" ? row.updated_at?.toISOString() : undefined,
+      cancelled_at: row.status === 'CANCELLED' ? row.updated_at?.toISOString() : undefined,
     };
   }
 }

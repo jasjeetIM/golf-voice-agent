@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 export const CancelReservationRequestSchema = z.object({
   confirmation_code: z.string().min(1),
@@ -7,7 +7,7 @@ export const CancelReservationRequestSchema = z.object({
 
 export const CancelReservationResponseSchema = z.object({
   confirmation_code: z.string(),
-  status: z.enum(["CANCELLED", "CONFIRMED"]),
+  status: z.enum(['CANCELLED', 'CONFIRMED']),
   cancelled_at: z.string().optional(),
   policy: z
     .object({

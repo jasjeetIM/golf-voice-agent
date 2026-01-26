@@ -1,5 +1,5 @@
 // Domain types placeholder
-import { z } from "zod";
+import { z } from 'zod';
 
 export const CourseIdSchema = z.string().min(1);
 export const TimezoneSchema = z.string().min(1);

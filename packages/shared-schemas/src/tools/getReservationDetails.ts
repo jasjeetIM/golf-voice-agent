@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { ReservationSchema } from "../domain/reservation.js";
+import { z } from 'zod';
+import { ReservationSchema } from '../domain/reservation.js';
 
 export const GetReservationDetailsRequestSchema = z.object({
   confirmation_code: z.string().min(1),

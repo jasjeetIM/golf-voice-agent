@@ -1,37 +1,31 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import {
-  BookTeeTimeRequestSchema,
-  BookTeeTimeResponseSchema,
-} from "@golf/shared-schemas";
-import { InventoryStore } from "../../../services/inventory/inventoryStore.js";
-import { ReservationStore } from "../../../services/reservations/reservationStore.js";
-import { env } from "../../../config/env.js";
-import { withTransaction } from "../../../db/tx.js";
-import { makeConfirmationCode } from "../../../services/reservations/confirmationCode.js";
-import { pool } from "../../../db/pool.js";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { BookTeeTimeRequestSchema, BookTeeTimeResponseSchema } from '@golf/shared-schemas';
+import { InventoryStore } from '../../../services/inventory/inventoryStore.js';
+import { ReservationStore } from '../../../services/reservations/reservationStore.js';
+import { env } from '../../../config/env.js';
+import { withTransaction } from '../../../db/tx.js';
+import { makeConfirmationCode } from '../../../services/reservations/confirmationCode.js';
+import { pool } from '../../../db/pool.js';
 
 type Deps = { inventory: InventoryStore; reservations: ReservationStore };
 
 export function registerBookTeeTime(app: FastifyInstance, { inventory, reservations }: Deps) {
   app.post(
-    "/v1/tools/book-tee-time",
-    async (
-      req: FastifyRequest<{ Body: unknown }>,
-      reply: FastifyReply
-    ) => {
-      const auth = req.headers["authorization"];
+    '/v1/tools/book-tee-time',
+    async (req: FastifyRequest<{ Body: unknown }>, reply: FastifyReply) => {
+      const auth = req.headers['authorization'];
       if (auth !== `Bearer ${env.BACKEND_API_KEY}`) {
-        reply.code(401).send({ error: "Unauthorized" });
+        reply.code(401).send({ error: 'Unauthorized' });
         return;
       }
       if (env.DB_READ_ONLY) {
-        reply.code(403).send({ error: "DB is in read-only mode" });
+        reply.code(403).send({ error: 'DB is in read-only mode' });
         return;
       }
 
       const parsed = BookTeeTimeRequestSchema.safeParse(req.body);
       if (!parsed.success) {
-        reply.code(400).send({ error: "Invalid request", details: parsed.error.flatten() });
+        reply.code(400).send({ error: 'Invalid request', details: parsed.error.flatten() });
         return;
       }
 
@@ -40,16 +34,20 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
           // Lock slot
           const slot = await inventory.getSlotForUpdate(client, parsed.data.slot_id);
           if (!slot) {
-            throw Object.assign(new Error("slot_id not found"), { statusCode: 404 });
+            throw Object.assign(new Error('slot_id not found'), { statusCode: 404 });
           }
           // Check capacity
           if (slot.players_booked + parsed.data.players > slot.capacity_players || slot.is_closed) {
-            throw Object.assign(new Error("Slot no longer available"), { statusCode: 409 });
+            throw Object.assign(new Error('Slot no longer available'), { statusCode: 409 });
           }
           // Increment players_booked
-          const updatedSlot = await inventory.incrementPlayersBooked(client, parsed.data.slot_id, parsed.data.players);
+          const updatedSlot = await inventory.incrementPlayersBooked(
+            client,
+            parsed.data.slot_id,
+            parsed.data.players
+          );
           if (!updatedSlot) {
-            throw Object.assign(new Error("Slot no longer available"), { statusCode: 409 });
+            throw Object.assign(new Error('Slot no longer available'), { statusCode: 409 });
           }
           const start_ts: string = updatedSlot.start_ts.toISOString();
           // Upsert customer (very simple)
@@ -62,7 +60,7 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
           );
           const customer_id = customer.rows[0].customer_id;
 
-          const confirmation_code = makeConfirmationCode("RES");
+          const confirmation_code = makeConfirmationCode('RES');
           const resInsert = await client.query(
             `INSERT INTO reservations
              (course_id, slot_id, customer_id, start_ts, num_holes, reservation_type, num_players, status, created_by_call_id)
@@ -90,7 +88,7 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
           return {
             reservation_id,
             confirmation_code,
-            status: "CONFIRMED",
+            status: 'CONFIRMED',
             course_id: slot.course_id,
             date: start_ts.slice(0, 10),
             start_local: start_ts.slice(11, 16),
@@ -103,13 +101,15 @@ export function registerBookTeeTime(app: FastifyInstance, { inventory, reservati
           };
         });
 
-        reply.send(BookTeeTimeResponseSchema.parse({
-          confirmation_code: resv.confirmation_code,
-          reservation: resv,
-        }));
+        reply.send(
+          BookTeeTimeResponseSchema.parse({
+            confirmation_code: resv.confirmation_code,
+            reservation: resv,
+          })
+        );
       } catch (err: any) {
         const status = err.statusCode ?? 500;
-        reply.code(status).send({ error: err.message ?? "Internal Server Error" });
+        reply.code(status).send({ error: err.message ?? 'Internal Server Error' });
       }
     }
   );
