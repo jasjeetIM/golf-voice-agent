@@ -20,15 +20,15 @@ Twilio (PSTN + Media Streams)
 |
 v
 +-------------------+
-| voice-gateway |
-| (realtime edge) |
+| voice-gateway     |
+| (realtime edge)   |
 +-------------------+
 |
 | HTTP (tool calls)
 v
 +-------------------+
-| backend |
-| (domain + DB) |
+| backend           |
+| (domain + DB)     |
 +-------------------+
 |
 v
@@ -52,26 +52,25 @@ PostgreSQL
 ## Repository Structure
 
 .
-├── apps/
-│ ├── voice-gateway/ # Realtime edge service (Twilio + Agent)
-│ └── backend/ # Domain logic + PostgreSQL
-├── packages/ # Shared types/utilities (if applicable)
+├── python/                 # Python port (active)
+│   ├── backend/            # Domain logic + PostgreSQL
+│   ├── voice_gateway/      # Realtime edge service (Twilio + RealtimeAgent)
+│   └── shared/             # Shared schemas
+├── archive/                # Archived TypeScript implementation
 └── README.md
 
 ---
 
-## Services
+## Services (Python)
 
-### voice-gateway
+### voice_gateway
 
 Handles:
 
 - Incoming Twilio calls
 - Media streaming via WebSockets
-- STT → LLM → TTS agent loop
-- Tool invocation (HTTP calls to backend)
-
-See: `apps/voice-gateway/README.md`
+- STT → LLM → TTS agent loop (OpenAI Realtime)
+- Tool invocation via MCP-backed tools
 
 ### backend
 
@@ -82,33 +81,18 @@ Handles:
 - Audit logs and call observability
 - Notification outbox (SMS/email)
 
-See: `apps/backend/README.md`
-
----
-
-## Deployment Model
-
-- Each service is independently deployable
-- Scales horizontally
-- No shared in-memory state
-- Environment-variable driven configuration
-
 ---
 
 ## Getting Started
 
-Quick start (after `pnpm install`):
+See the Python README:
 
-- Backend: `pnpm --filter @golf/backend run dev`
-- Gateway: `pnpm --filter @golf/voice-gateway run dev`
+- `python/README.md`
 
-Dotenv hints:
+---
 
-- Core: `PUBLIC_HOST`, `PUBLIC_PROTOCOL`, `VOICE_GATEWAY_PORT`, `BACKEND_PORT`
-- Gateway: `OPENAI_API_KEY`, `BACKEND_API_KEY`, `LOG_LEVEL` (derives URLs from host/ports)
-- Backend: `DB_CONNECTION_STRING`, `DB_SSL`, `DB_POOL_MAX`, `DB_READ_ONLY`, `BACKEND_API_KEY`
+## Archive
 
-For more, see:
+The original TypeScript implementation has been moved to:
 
-- `apps/voice-gateway/README.md`
-- `apps/backend/README.md`
+- `archive/`

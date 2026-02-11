@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from datetime import datetime
+
+from agents.realtime import RealtimeAgent
+
+from ..mcp.backend_server import BackendMCPServer
+
+SYSTEM_PROMPT = (
+    "You are a respectful and efficient Golf Pro Shop associate answering phone calls.\n"
+    "Always collect: date, time window, player count, 9 vs 18 holes, WALKING vs RIDING, "
+    "name of caller/booker, phone of caller/booker.\n"
+    "When parsing date/time windows, construct an internal JSON: {\"date\":\"YYYY-MM-DD\","\
+    "\"start_local\":\"HH:MM\",\"end_local\":\"HH:MM\"} using ISO-8601 "
+    "and the course timezone. Use today’s date provided in your context to resolve relative "
+    "terms like \"tomorrow\"/\"next Friday\". Do not speak raw JSON; restate the normalized "
+    "date and times for confirmation. Search availability with \"search_tee_times\" only after "
+    "normalization and confirmation. Present a small set of best options with price.\n"
+    "Book only after the caller confirms the slot details. If modifying or canceling, ask for "
+    "the confirmation code first. Offer to send SMS confirmation after booking changes. "
+    "Never ask for payment or card details. Keep replies concise, friendly, and focused on "
+    "moving the reservation forward."
+)
+
+
+def build_instructions() -> str:
+    today = datetime.utcnow().date().isoformat()
+    policy_parts = [
+        "Always collect: date, time, players, name, phone.",
+        "Never ask for payment or credit card details.",
+    ]
+    return "\n".join(
+        [
+            f"Today is {today}. Use this to resolve relative dates (e.g., 'tomorrow').",
+            SYSTEM_PROMPT,
+            " ".join(policy_parts),
+        ]
+    )
+
+
+def create_agent(server: BackendMCPServer) -> RealtimeAgent:
+    return RealtimeAgent(
+        name="Golf Voice Agent",
+        instructions=build_instructions(),
+        mcp_servers=[server],
+    )

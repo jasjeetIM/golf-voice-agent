@@ -1,0 +1,35 @@
+[project]
+name = "golf-voice-agent-python"
+version = "0.1.0"
+description = "Python port of golf-voice-agent"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "UNLICENSED" }
+authors = [{ name = "Golf Voice Agent" }]
+
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "httpx>=0.27",
+  "asyncpg>=0.29",
+  "pydantic>=2.7",
+  "pydantic-settings>=2.2",
+  "python-dotenv>=1.0",
+  "openai-agents>=0.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["backend*", "voice_gateway*", "shared*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
