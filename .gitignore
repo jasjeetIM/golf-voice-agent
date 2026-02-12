@@ -1,6 +1,8 @@
 # builds
 dist
 **/dist
+build/
+**/build/
 
 # env
 .env
