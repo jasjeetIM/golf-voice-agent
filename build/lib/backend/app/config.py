@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     """Environment-backed runtime settings for backend APIs and data access."""
 
     # The repository uses one shared `.env` file for backend, voice gateway, and
-    # seed scripts.
+    # seed scripts. Ignore unknown keys so each service can load only what it
+    # needs without failing on unrelated variables.
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

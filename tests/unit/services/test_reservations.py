@@ -297,9 +297,7 @@ def test_modify_propagates_call_id_to_reservation_updates_and_change_log() -> No
     )
     assert reservation_update_args[-1] == call_id
     change_insert_args = next(
-        args
-        for sql, args in conn.calls["execute"]
-        if "INSERT INTO reservation_changes" in sql
+        args for sql, args in conn.calls["execute"] if "INSERT INTO reservation_changes" in sql
     )
     assert change_insert_args[1] == call_id
 

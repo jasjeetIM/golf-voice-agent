@@ -1,98 +1,91 @@
 # Golf Voice Agent
 
-A real-time voice-based golf reservation system that allows customers to book, modify, and cancel tee times over the phone using a conversational AI agent.
+Real-time voice reservation platform for golf tee times.
 
-The system integrates:
+## System Architecture
 
-- Twilio (PSTN + Media Streams)
-- Real-time speech-to-text and text-to-speech
-- A tool-using LLM agent
-- A PostgreSQL-backed reservation system
-- SMS/email confirmations
+The codebase is organized as two services plus shared contracts:
+- `voice_gateway`: The realtime edge that handles Twilio media streams, OpenAI realtime
+  agent orchestration, and backend tool bridging.
+- `backend`: The domain service that exposes tool routes (`/v1/tools/...`) for inventory,
+  reservations, and persistence.
+- `shared`: Common Pydantic schemas and enums used by both services to keep request/response
+  contracts consistent.
 
-The architecture prioritizes **correctness, debuggability, and scalability**, while remaining cloud-native and compliant with 12-factor principles.
+Runtime request/data flow:
+1. Twilio PSTN/media stream traffic enters `voice_gateway`.
+2. `voice_gateway` invokes backend tool endpoints when business logic or data is needed.
+3. `backend` executes domain logic and reads/writes PostgreSQL tables.
 
----
+## Repository Layout
 
-## High-Level Architecture
+Current top-level structure:
 
-Twilio (PSTN + Media Streams)
-|
-v
-+-------------------+
-| voice-gateway     |
-| (realtime edge)   |
-+-------------------+
-|
-| HTTP (tool calls)
-v
-+-------------------+
-| backend           |
-| (domain + DB)     |
-+-------------------+
-|
-v
-PostgreSQL
+```text
+backend/                 FastAPI backend app, domain services, migrations, seed script
+voice_gateway/           FastAPI voice edge service (Twilio + realtime agent integration)
+shared/                  Shared schemas/enums used across services
+tests/unit/              Unit tests for backend services and voice_gateway modules
+pyproject.toml           Dependencies and tool configuration (ruff/pytest/build)
+.env                     Local defaults used by config modules
+README.md                Project overview and local workflow
+```
 
-### Design Principles
+## Local Prerequisites
 
-- **Separation of concerns**
-  - Realtime audio + agent orchestration is isolated from database logic
-- **Strong transactional guarantees**
-  - No double booking
-  - Safe retries and idempotency
-- **Observability-first**
-  - Every call and action is traceable
-- **12-factor compliant**
-  - Stateless services
-  - Backing services treated as attached resources
+- Python 3.11+
+- PostgreSQL (for backend persistence and optional voice observability logging)
+- Twilio/OpenAI credentials when running full end-to-end flows
 
----
+## Commands (1-7)
 
-## Repository Structure
+Run commands from repo root:
 
-.
-├── python/                 # Python port (active)
-│   ├── backend/            # Domain logic + PostgreSQL
-│   ├── voice_gateway/      # Realtime edge service (Twilio + RealtimeAgent)
-│   └── shared/             # Shared schemas
-├── archive/                # Archived TypeScript implementation
-└── README.md
+```bash
+cd /Users/dhalijs1/Documents/voice_agent/golf-voice-agent
+```
 
----
+1. Install dev dependencies
+```bash
+python -m pip install -e ".[dev]"
+```
 
-## Services (Python)
+2. Run lint checks
+```bash
+ruff check .
+```
 
-### voice_gateway
+3. Run format checks
+```bash
+ruff format --check .
+```
 
-Handles:
+4. Run compile/syntax checks
+```bash
+python -m compileall backend voice_gateway shared tests
+```
 
-- Incoming Twilio calls
-- Media streaming via WebSockets
-- STT → LLM → TTS agent loop (OpenAI Realtime)
-- Tool invocation via MCP-backed tools
+5. Run unit tests
+```bash
+pytest tests/unit -q
+```
 
-### backend
+6. Build package artifacts
+```bash
+python -m build
+```
 
-Handles:
+7. Run both services locally
+```bash
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8081 --reload
+uvicorn voice_gateway.app.main:app --host 0.0.0.0 --port 8080 --reload
+```
 
-- Reservation and tee-time inventory logic
-- PostgreSQL schema and transactions
-- Audit logs and call observability
-- Notification outbox (SMS/email)
+## Optional Local Data Setup
 
----
+Apply schema and seed example tee times after PostgreSQL is running:
 
-## Getting Started
-
-See the Python README:
-
-- `python/README.md`
-
----
-
-## Archive
-
-The original TypeScript implementation has been moved to:
-
-- `archive/`
+```bash
+psql "$DB_CONNECTION_STRING" -f backend/migrations/0001_init.sql
+python backend/scripts/seed_slots.py
+```
