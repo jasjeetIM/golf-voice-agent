@@ -19,12 +19,14 @@ from ..services.inventory import InventoryStore
 from ..services.reservations import ReservationStore
 
 ############################### GLOBALS ###############################
+
 router = APIRouter(prefix="/v1/tools")
 inventory_store = InventoryStore()
 reservation_store = ReservationStore()
 SEARCH_FRESHNESS_TTL_SECONDS = 300
 
 ############################### HELPERS ###############################
+
 def require_auth(authorization: str | None = Header(default=None)) -> None:
     """Validates bearer-token authentication for tool endpoints.
 
