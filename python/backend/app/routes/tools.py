@@ -1,7 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
+"""Tool API routes for tee time reservation management.
 
+The goal of this module is to keep endpoint handlers thin and move repeatable
+logic (auth, write guards, shared DB lookups/normalization) into helpers.
+"""
+
+from datetime import datetime
+from typing import Any
+
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Header
 
 from shared import schemas
@@ -10,52 +18,161 @@ from ..db import get_conn, transaction
 from ..services.inventory import InventoryStore
 from ..services.reservations import ReservationStore
 
+############################### GLOBALS ###############################
 router = APIRouter(prefix="/v1/tools")
+inventory_store = InventoryStore()
+reservation_store = ReservationStore()
+SEARCH_FRESHNESS_TTL_SECONDS = 300
 
-inventory = InventoryStore()
-reservations = ReservationStore()
-
-
+############################### HELPERS ###############################
 def require_auth(authorization: str | None = Header(default=None)) -> None:
+    """Validates bearer-token authentication for tool endpoints.
+
+    Args:
+        authorization: Raw Authorization header value.
+
+    Raises:
+        HTTPException: If the caller token does not match the backend API key.
+    """
     if authorization != f"Bearer {settings.BACKEND_API_KEY}":
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
+def require_writable_db() -> None:
+    """Guards write operations when the backend is configured as read-only.
+
+    Raises:
+        HTTPException: If write operations are currently disabled.
+    """
+    if settings.DB_READ_ONLY:
+        raise HTTPException(status_code=403, detail="DB is in read-only mode")
+
+
+def build_freshness_payload() -> dict[str, Any]:
+    """Builds response metadata used by clients to reason about staleness.
+
+    Returns:
+        A payload containing generation time and time-to-live settings.
+    """
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "ttl_seconds": SEARCH_FRESHNESS_TTL_SECONDS,
+    }
+
+
+def normalize_modify_changes(request: schemas.ModifyReservationRequest) -> dict[str, Any]:
+    """Normalizes modify-reservation fields before persistence.
+
+    Reservation type is normalized to uppercase so downstream logic can rely on
+    a single representation regardless of caller casing.
+
+    Args:
+        request: Validated API payload for a reservation modification.
+
+    Returns:
+        A normalized dictionary of requested changes.
+    """
+    normalized_changes = request.changes.model_dump()
+    reservation_type = normalized_changes.get("reservation_type")
+    if reservation_type:
+        normalized_changes["reservation_type"] = str(reservation_type).upper()
+    return normalized_changes
+
+
+async def fetch_slot_by_id(conn: asyncpg.Connection, slot_id: str) -> asyncpg.Record | None:
+    """Fetches a tee-time slot by identifier.
+
+    Args:
+        conn: Active database connection.
+        slot_id: Target slot identifier.
+
+    Returns:
+        Matching slot row if found, otherwise ``None``.
+    """
+    return await conn.fetchrow(
+        "SELECT * FROM tee_time_slots WHERE slot_id = $1",
+        slot_id,
+    )
+
+
+async def get_reservation_or_404(
+    conn: asyncpg.Connection, confirmation_code: str
+) -> schemas.Reservation:
+    """Fetches a reservation and enforces consistent not-found handling.
+
+    Args:
+        conn: Active database connection.
+        confirmation_code: Reservation confirmation code from the caller.
+
+    Returns:
+        The matching reservation.
+
+    Raises:
+        HTTPException: If no reservation exists for the confirmation code.
+    """
+    reservation = await reservation_store.find_by_confirmation(conn, confirmation_code)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+    return reservation
+
+
+def slot_has_capacity(slot: dict[str, Any] | asyncpg.Record, players: int) -> bool:
+    """Evaluates whether a slot can accept additional players.
+
+    Args:
+        slot: Slot data containing capacity, booked count, and open/closed state.
+        players: Number of players requested for this operation.
+
+    Returns:
+        ``True`` when the slot is open and has enough remaining capacity.
+    """
+    return not slot["is_closed"] and slot["players_booked"] + players <= slot["capacity_players"]
+
+
+############################### ROUTES ###############################
+
+## Endpoint: Search Tee Times
+## Usage: Search the current tee time inventory for available tee times and return options.
 @router.post("/search-tee-times", response_model=schemas.SearchTeeTimesResponse)
 async def search_tee_times(
     request: schemas.SearchTeeTimesRequest, _auth: None = Depends(require_auth)
 ):
+    # Read-only flow: query availability, then attach freshness metadata.
     async with get_conn() as conn:
-        options = await inventory.search(conn, request)
+        options = await inventory_store.search(conn, request)
     return schemas.SearchTeeTimesResponse(
         course_id=request.course_id,
         date=request.date,
         timezone="America/New_York",
         options=options,
-        freshness={"generated_at": datetime.utcnow().isoformat(), "ttl_seconds": 300},
+        freshness=build_freshness_payload(),
     )
 
 
+## Endpoint: Book Tee Time
+## Usage: Reserve a selected slot for a caller and return reservation details.
 @router.post("/book-tee-time", response_model=schemas.BookTeeTimeResponse)
 async def book_tee_time(
     request: schemas.BookTeeTimeRequest, _auth: None = Depends(require_auth)
 ):
-    if settings.DB_READ_ONLY:
-        raise HTTPException(status_code=403, detail="DB is in read-only mode")
+    # Booking mutates inventory and reservation state, so writes must be enabled.
+    require_writable_db()
 
     async with transaction() as conn:
-        slot = await inventory.get_slot_for_update(conn, request.slot_id)
+        # Lock the slot row first so capacity checks and inventory updates are atomic.
+        slot = await inventory_store.get_slot_for_update(conn, request.slot_id)
         if not slot:
             raise HTTPException(status_code=404, detail="slot_id not found")
-        if slot["players_booked"] + request.players > slot["capacity_players"] or slot["is_closed"]:
+        if not slot_has_capacity(slot, request.players):
             raise HTTPException(status_code=409, detail="Slot no longer available")
 
-        updated_slot = await inventory.increment_players_booked(
+        updated_slot = await inventory_store.increment_players_booked(
             conn, request.slot_id, request.players
         )
         if not updated_slot:
             raise HTTPException(status_code=409, detail="Slot no longer available")
 
+        # Upsert customer so repeated callers keep a single identity record.
         customer_row = await conn.fetchrow(
             """
             INSERT INTO customers (phone_e164, full_name)
@@ -68,9 +185,11 @@ async def book_tee_time(
         )
         customer_id = customer_row["customer_id"]
 
-        reservation = await reservations.create(
+        # Persist reservation and reservation-change history in the same transaction.
+        reservation = await reservation_store.create(
             conn,
             idempotency_key=request.idempotency_key,
+            call_id=request.call_id,
             slot_id=request.slot_id,
             num_holes=request.num_holes,
             reservation_type=request.reservation_type,
@@ -84,22 +203,22 @@ async def book_tee_time(
     )
 
 
+## Endpoint: Modify Reservation
+## Usage: Apply caller-requested changes to an existing reservation.
 @router.post("/modify-reservation", response_model=schemas.ModifyReservationResponse)
 async def modify_reservation(
     request: schemas.ModifyReservationRequest, _auth: None = Depends(require_auth)
 ):
-    if settings.DB_READ_ONLY:
-        raise HTTPException(status_code=403, detail="DB is in read-only mode")
-
-    normalized_changes = request.changes.model_dump()
-    if "reservation_type" in normalized_changes and normalized_changes["reservation_type"]:
-        normalized_changes["reservation_type"] = str(normalized_changes["reservation_type"]).upper()
+    # Modifications are writes; enforce the same read-only gate as booking/cancel.
+    require_writable_db()
+    normalized_changes = normalize_modify_changes(request)
 
     async with transaction() as conn:
-        updated = await reservations.modify(
+        updated = await reservation_store.modify(
             conn,
             confirmation_code=request.confirmation_code,
             changes=normalized_changes,
+            call_id=request.call_id,
         )
         if not updated:
             raise HTTPException(status_code=404, detail="Reservation not found")
@@ -110,15 +229,22 @@ async def modify_reservation(
     )
 
 
+## Endpoint: Cancel Reservation
+## Usage: Cancel an existing reservation using its confirmation code.
 @router.post("/cancel-reservation", response_model=schemas.CancelReservationResponse)
 async def cancel_reservation(
     request: schemas.CancelReservationRequest, _auth: None = Depends(require_auth)
 ):
-    if settings.DB_READ_ONLY:
-        raise HTTPException(status_code=403, detail="DB is in read-only mode")
+    # Cancellation mutates reservation status and audit history.
+    require_writable_db()
 
     async with transaction() as conn:
-        updated = await reservations.cancel(conn, request.confirmation_code)
+        updated = await reservation_store.cancel(
+            conn,
+            request.confirmation_code,
+            request.idempotency_key,
+            request.call_id,
+        )
         if not updated:
             raise HTTPException(status_code=404, detail="Reservation not found")
 
@@ -130,44 +256,54 @@ async def cancel_reservation(
     )
 
 
-@router.post("/get-reservation-details", response_model=schemas.GetReservationDetailsResponse)
+## Endpoint: Get Reservation Details
+## Usage: Fetch the current reservation state for a confirmation code.
+@router.post(
+    "/get-reservation-details",
+    response_model=schemas.GetReservationDetailsResponse,
+)
 async def get_reservation_details(
     request: schemas.GetReservationDetailsRequest, _auth: None = Depends(require_auth)
 ):
+    # Read-only lookup with consistent 404 behavior.
     async with get_conn() as conn:
-        reservation = await reservations.find_by_confirmation(conn, request.confirmation_code)
-        if not reservation:
-            raise HTTPException(status_code=404, detail="Reservation not found")
+        reservation = await get_reservation_or_404(conn, request.confirmation_code)
 
     return schemas.GetReservationDetailsResponse(reservation=reservation)
 
 
-@router.post("/quote-reservation-change", response_model=schemas.QuoteReservationChangeResponse)
+## Endpoint: Quote Reservation Change
+## Usage: Evaluate whether a proposed change is currently feasible before applying it.
+@router.post(
+    "/quote-reservation-change",
+    response_model=schemas.QuoteReservationChangeResponse,
+)
 async def quote_reservation_change(
     request: schemas.QuoteReservationChangeRequest, _auth: None = Depends(require_auth)
 ):
+    # Quote mode never mutates data; it only evaluates feasibility.
     async with get_conn() as conn:
-        current = await reservations.find_by_confirmation(conn, request.confirmation_code)
-        if not current:
-            raise HTTPException(status_code=404, detail="Reservation not found")
+        current = await get_reservation_or_404(conn, request.confirmation_code)
 
         capacity_ok = True
         reason = None
         target_start_ts = None
 
+        # If a new slot is requested, evaluate open/closed and capacity constraints.
         if request.new_slot_id:
-            slot = await conn.fetchrow(
-                "SELECT * FROM tee_time_slots WHERE slot_id = $1",
-                request.new_slot_id,
-            )
-            if not slot or slot["is_closed"]:
+            slot = await fetch_slot_by_id(conn, request.new_slot_id)
+            if not slot:
                 capacity_ok = False
                 reason = "Requested slot unavailable"
             else:
                 desired_players = request.new_players or current.players
-                if slot["players_booked"] + desired_players > slot["capacity_players"]:
+                if not slot_has_capacity(slot, desired_players):
                     capacity_ok = False
-                    reason = "Not enough capacity"
+                    reason = (
+                        "Requested slot unavailable"
+                        if slot["is_closed"]
+                        else "Not enough capacity"
+                    )
                 else:
                     target_start_ts = slot["start_ts"].isoformat()
 
@@ -179,22 +315,22 @@ async def quote_reservation_change(
     )
 
 
-@router.post("/check-slot-capacity", response_model=schemas.CheckSlotCapacityResponse)
+## Endpoint: Check Slot Capacity
+## Usage: Check if a specific slot can support the requested player count.
+@router.post(
+    "/check-slot-capacity",
+    response_model=schemas.CheckSlotCapacityResponse,
+)
 async def check_slot_capacity(
     request: schemas.CheckSlotCapacityRequest, _auth: None = Depends(require_auth)
 ):
+    # Simple capacity probe for callers that already know the slot identifier.
     async with get_conn() as conn:
-        slot = await conn.fetchrow(
-            "SELECT * FROM tee_time_slots WHERE slot_id = $1",
-            request.slot_id,
-        )
+        slot = await fetch_slot_by_id(conn, request.slot_id)
         if not slot:
             raise HTTPException(status_code=404, detail="slot_id not found")
 
-    available = (
-        not slot["is_closed"]
-        and slot["players_booked"] + request.players <= slot["capacity_players"]
-    )
+    available = slot_has_capacity(slot, request.players)
 
     return schemas.CheckSlotCapacityResponse(
         available=available,
@@ -203,10 +339,16 @@ async def check_slot_capacity(
     )
 
 
-@router.post("/send-sms-confirmation", response_model=schemas.SendSmsConfirmationResponse)
+## Endpoint: Send SMS Confirmation
+## Usage: Return a confirmation payload for SMS notification dispatch.
+@router.post(
+    "/send-sms-confirmation",
+    response_model=schemas.SendSmsConfirmationResponse,
+)
 async def send_sms_confirmation(
     request: schemas.SendSmsConfirmationRequest, _auth: None = Depends(require_auth)
 ):
+    # Placeholder endpoint: currently reports queuing intent without external SMS I/O.
     return schemas.SendSmsConfirmationResponse(
         status="queued",
         confirmation_code=request.confirmation_code,

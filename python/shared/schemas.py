@@ -87,6 +87,7 @@ class TeeTimeOption(BaseModel):
 
 
 class SearchTeeTimesRequest(BaseModel):
+    call_id: Optional[str] = None
     course_id: str
     date: str
     time_window: TimeWindow
@@ -106,6 +107,7 @@ class SearchTeeTimesResponse(BaseModel):
 
 class BookTeeTimeRequest(BaseModel):
     idempotency_key: str
+    call_id: Optional[str] = None
     slot_id: str
     primary_contact: PrimaryContact
     players: int = Field(ge=1, le=4)
@@ -121,6 +123,7 @@ class BookTeeTimeResponse(BaseModel):
 class ModifyReservationRequest(BaseModel):
     confirmation_code: str
     idempotency_key: str
+    call_id: Optional[str] = None
     class Changes(BaseModel):
         start_local: Optional[str] = None
         players: Optional[int] = Field(default=None, ge=1, le=4)
@@ -147,6 +150,7 @@ class ModifyReservationResponse(BaseModel):
 class CancelReservationRequest(BaseModel):
     confirmation_code: str
     idempotency_key: str
+    call_id: Optional[str] = None
 
 
 class CancelReservationResponse(BaseModel):
@@ -157,6 +161,7 @@ class CancelReservationResponse(BaseModel):
 
 
 class SendSmsConfirmationRequest(BaseModel):
+    call_id: Optional[str] = None
     confirmation_code: str
     phone_e164: str
 
@@ -168,6 +173,7 @@ class SendSmsConfirmationResponse(BaseModel):
 
 
 class GetReservationDetailsRequest(BaseModel):
+    call_id: Optional[str] = None
     confirmation_code: str
 
 
@@ -176,6 +182,7 @@ class GetReservationDetailsResponse(BaseModel):
 
 
 class QuoteReservationChangeRequest(BaseModel):
+    call_id: Optional[str] = None
     confirmation_code: str
     new_slot_id: Optional[str] = None
     new_players: Optional[int] = Field(default=None, ge=1, le=4)
@@ -190,6 +197,7 @@ class QuoteReservationChangeResponse(BaseModel):
 
 
 class CheckSlotCapacityRequest(BaseModel):
+    call_id: Optional[str] = None
     slot_id: str
     players: int = Field(ge=1, le=4)
 

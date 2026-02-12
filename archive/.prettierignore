@@ -1,6 +1,0 @@
-node_modules
-dist
-.turbo
-.next
-coverage
-.pnpm-store

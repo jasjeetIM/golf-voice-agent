@@ -1,24 +1,15 @@
-# dependencies
-node_modules
-archive/node_modules
-
 # builds
 dist
 **/dist
-*.tsbuildinfo
-pnpm-lock.yaml
-archive/pnpm-lock.yaml
-archive/.pnpm-store
 
 # env
 .env
 .env.*.local
-archive/.env
-archive/.env.*.local
 
 # python
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
 .venv/

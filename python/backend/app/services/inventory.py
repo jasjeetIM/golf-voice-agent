@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+"""Inventory data access for tee time management."""
+
 from typing import Any
 
 import asyncpg
 
-from shared.schemas import SearchTeeTimesRequest, TeeTimeOption, Money
+from shared.schemas import Money, SearchTeeTimesRequest, TeeTimeOption
 
 
 class InventoryStore:
-    async def search(self, conn: asyncpg.Connection, req: SearchTeeTimesRequest) -> list[TeeTimeOption]:
+    """Persistence operations for tee-time slot inventory."""
+
+    async def search(
+        self,
+        conn: asyncpg.Connection,
+        req: SearchTeeTimesRequest,
+    ) -> list[TeeTimeOption]:
+        """Searches for available tee-time slots matching caller constraints.
+
+        Args:
+            conn: Active database connection.
+            req: Validated search criteria from the API layer.
+
+        Returns:
+            A list of user-facing tee-time options sorted by start time.
+        """
+        # Filter to a single course/date window and enforce live capacity limits.
         sql = """
             SELECT slot_id, start_ts, capacity_players, players_booked, base_price_cents, currency
             FROM tee_time_slots
@@ -30,6 +48,8 @@ class InventoryStore:
             req.players,
             req.max_results,
         )
+
+        # Convert persistence rows into API contract models with derived fields.
         options: list[TeeTimeOption] = []
         for row in rows:
             start_ts = row["start_ts"]
@@ -39,6 +59,7 @@ class InventoryStore:
                 TeeTimeOption(
                     slot_id=str(row["slot_id"]),
                     start_local=start_local,
+                    # Current business rule: tee-time slots are sold as 4-hour rounds.
                     duration_min=240,
                     players_allowed=[
                         p
@@ -58,7 +79,20 @@ class InventoryStore:
             )
         return options
 
-    async def get_slot_for_update(self, conn: asyncpg.Connection, slot_id: str) -> dict[str, Any] | None:
+    async def get_slot_for_update(
+        self,
+        conn: asyncpg.Connection,
+        slot_id: str,
+    ) -> dict[str, Any] | None:
+        """Fetches and row-locks a slot for atomic inventory mutation.
+
+        Args:
+            conn: Active database connection.
+            slot_id: Target tee-time slot identifier.
+
+        Returns:
+            The locked slot row as a dictionary, or ``None`` when not found.
+        """
         row = await conn.fetchrow(
             "SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE",
             slot_id,
@@ -68,6 +102,17 @@ class InventoryStore:
     async def increment_players_booked(
         self, conn: asyncpg.Connection, slot_id: str, players: int
     ) -> dict[str, Any] | None:
+        """Adds players to a slot when capacity constraints permit.
+
+        Args:
+            conn: Active database connection.
+            slot_id: Target tee-time slot identifier.
+            players: Number of players to add.
+
+        Returns:
+            Updated slot row, or ``None`` when capacity or open-state checks fail.
+        """
+        # Capacity and open/closed checks are embedded in the UPDATE predicate.
         row = await conn.fetchrow(
             """
             UPDATE tee_time_slots
@@ -83,6 +128,16 @@ class InventoryStore:
     async def decrement_players_booked(
         self, conn: asyncpg.Connection, slot_id: str, players: int
     ) -> dict[str, Any] | None:
+        """Decrements booked players on a slot, never dropping below zero.
+
+        Args:
+            conn: Active database connection.
+            slot_id: Target tee-time slot identifier.
+            players: Number of players to remove.
+
+        Returns:
+            Updated slot row, or ``None`` when the slot does not exist.
+        """
         row = await conn.fetchrow(
             """
             UPDATE tee_time_slots

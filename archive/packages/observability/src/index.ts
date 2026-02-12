@@ -1,2 +1,0 @@
-// Observability barrel placeholder
-export {};
