@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Inventory data access for tee time management."""
+
+from __future__ import annotations
 
 from typing import Any
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,11 @@ class Settings(BaseSettings):
         OPENAI_API_KEY: API key for realtime model access.
         BACKEND_API_KEY: Bearer token sent to backend tool APIs.
         LOG_LEVEL: Application log verbosity.
+        OBSERVABILITY_LOG_LEVEL: Log level for observability internals.
+        WEBSOCKETS_LOG_LEVEL: Log level for `websockets` library internals.
+        VERBOSE_TWILIO_STREAM_LOGGING: Enables per-frame media debug logs.
+        TWILIO_STREAM_LOG_SAMPLE_EVERY_N: Frame sampling cadence when verbose
+            stream logging is disabled.
         OPENAI_REALTIME_MODEL: Realtime model identifier.
         DB_CONNECTION_STRING: Optional observability database connection string.
         VALIDATE_TWILIO_SIGNATURES: Whether to enforce Twilio signature checks.
@@ -42,6 +48,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     BACKEND_API_KEY: str = "be_api_key"
     LOG_LEVEL: str = "info"
+    OBSERVABILITY_LOG_LEVEL: str = "info"
+    WEBSOCKETS_LOG_LEVEL: str = "info"
+    VERBOSE_TWILIO_STREAM_LOGGING: bool = False
+    TWILIO_STREAM_LOG_SAMPLE_EVERY_N: int = Field(default=100, ge=1)
     OPENAI_REALTIME_MODEL: str = "gpt-4o-realtime-preview-2024-12-17"
     DB_CONNECTION_STRING: str | None = None
 

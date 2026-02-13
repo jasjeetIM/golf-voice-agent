@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from .db import get_conn
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _to_jsonb(value: Any) -> str:
+    """Serializes a Python value for JSONB SQL parameters."""
+    return json.dumps(value, default=str)
+
+
+def _to_jsonb_or_none(value: Any | None) -> str | None:
+    """Serializes optional Python values for nullable JSONB SQL parameters."""
+    if value is None:
+        return None
+    return _to_jsonb(value)
 
 
 class DbLogger:
@@ -20,10 +33,18 @@ class DbLogger:
     def __init__(self, call_id: str, session_id: str | None = None) -> None:
         self.call_id = call_id
         self.session_id = session_id
+        _LOGGER.debug(
+            "DbLogger initialized.",
+            extra={"call_id": call_id, "session_id": session_id},
+        )
 
     def set_session_id(self, session_id: str | None) -> None:
         """Updates the OpenAI realtime session id bound to future events."""
         self.session_id = session_id
+        _LOGGER.debug(
+            "DbLogger session_id updated.",
+            extra={"call_id": self.call_id, "session_id": session_id},
+        )
 
     async def ensure_call(self, from_number: str, to_number: str) -> None:
         """Creates the call row if it does not already exist."""
@@ -52,7 +73,7 @@ class DbLogger:
                 INSERT INTO call_events (call_id, event_type, direction, source, payload_json)
                 VALUES ($1, $2, $3, $4, $5)
             """,
-            args=(self.call_id, event_type, direction, source, payload or {}),
+            args=(self.call_id, event_type, direction, source, _to_jsonb(payload or {})),
         )
 
     async def log_session_event(
@@ -81,7 +102,7 @@ class DbLogger:
                 direction,
                 item_id,
                 tool_call_id,
-                payload or {},
+                _to_jsonb(payload or {}),
             ),
         )
 
@@ -119,7 +140,7 @@ class DbLogger:
                 content.get("role"),
                 content.get("type"),
                 content.get("status"),
-                content,
+                _to_jsonb(content),
                 content.get("call_id"),
                 content.get("name"),
                 event_id,
@@ -155,8 +176,8 @@ class DbLogger:
                 self.call_id,
                 self.session_id,
                 tool_name,
-                args_json,
-                result_json,
+                _to_jsonb(args_json),
+                _to_jsonb_or_none(result_json),
                 status,
                 error_message,
                 tool_call_external_id,
@@ -194,17 +215,29 @@ class DbLogger:
                 self.session_id,
                 server_name,
                 method,
-                request_json or {},
-                response_json or {},
+                _to_jsonb(request_json or {}),
+                _to_jsonb(response_json or {}),
                 error_message,
             ),
         )
 
     async def _execute(self, operation_name: str, query: str, args: tuple[Any, ...]) -> None:
         """Runs a single SQL write and logs failures without raising."""
+        _LOGGER.debug(
+            "Executing observability DB write.",
+            extra={
+                "operation": operation_name,
+                "call_id": self.call_id,
+                "arg_count": len(args),
+            },
+        )
         try:
             async with get_conn() as conn:
                 await conn.execute(query, *args)
+            _LOGGER.debug(
+                "Observability DB write completed.",
+                extra={"operation": operation_name, "call_id": self.call_id},
+            )
         except Exception:
             _LOGGER.debug(
                 "Observability write failed during %s for call_id=%s",

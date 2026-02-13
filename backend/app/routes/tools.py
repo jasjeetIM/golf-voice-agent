@@ -1,12 +1,13 @@
-from __future__ import annotations
-
 """Tool API routes for tee time reservation management.
 
 The goal of this module is to keep endpoint handlers thin and move repeatable
 logic (auth, write guards, shared DB lookups/normalization) into helpers.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
+import logging
 from typing import Any
 
 import asyncpg
@@ -18,6 +19,7 @@ from ..db import get_conn, transaction
 from ..services.inventory import InventoryStore
 from ..services.reservations import ReservationStore
 
+_LOGGER = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/tools")
 inventory_store = InventoryStore()
 reservation_store = ReservationStore()
@@ -33,8 +35,14 @@ def require_auth(authorization: str | None = Header(default=None)) -> None:
     Raises:
         HTTPException: If the caller token does not match the backend API key.
     """
+    _LOGGER.debug(
+        "Authenticating backend tool request.",
+        extra={"authorization_present": authorization is not None},
+    )
     if authorization != f"Bearer {settings.BACKEND_API_KEY}":
+        _LOGGER.debug("Backend tool request auth failed.")
         raise HTTPException(status_code=401, detail="Unauthorized")
+    _LOGGER.debug("Backend tool request auth passed.")
 
 
 def require_writable_db() -> None:
@@ -43,7 +51,9 @@ def require_writable_db() -> None:
     Raises:
         HTTPException: If write operations are currently disabled.
     """
+    _LOGGER.debug("Checking backend DB write guard.", extra={"db_read_only": settings.DB_READ_ONLY})
     if settings.DB_READ_ONLY:
+        _LOGGER.debug("Write request rejected because backend is read-only.")
         raise HTTPException(status_code=403, detail="DB is in read-only mode")
 
 
@@ -147,10 +157,23 @@ def slot_has_capacity(slot: dict[str, Any] | asyncpg.Record, players: int) -> bo
 async def search_tee_times(
     request: schemas.SearchTeeTimesRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling search_tee_times request.",
+        extra={
+            "call_id": request.call_id,
+            "course_id": request.course_id,
+            "date": request.date,
+            "players": request.players,
+        },
+    )
     # Read-only flow: query availability, then attach freshness metadata.
     async with get_conn() as conn:
         options = await inventory_store.search(conn, request)
         timezone = await fetch_course_timezone(conn, request.course_id)
+    _LOGGER.debug(
+        "Completed search_tee_times request.",
+        extra={"call_id": request.call_id, "option_count": len(options), "timezone": timezone},
+    )
     return schemas.SearchTeeTimesResponse(
         course_id=request.course_id,
         date=request.date,
@@ -164,6 +187,15 @@ async def search_tee_times(
 ## Usage: Reserve a selected slot for a caller and return reservation details.
 @router.post("/book-tee-time", response_model=schemas.BookTeeTimeResponse)
 async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depends(require_auth)):
+    _LOGGER.debug(
+        "Handling book_tee_time request.",
+        extra={
+            "call_id": request.call_id,
+            "slot_id": request.slot_id,
+            "players": request.players,
+            "idempotency_key": request.idempotency_key,
+        },
+    )
     # Booking mutates inventory and reservation state, so writes must be enabled.
     require_writable_db()
 
@@ -205,6 +237,14 @@ async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depen
             players=request.players,
             customer_id=str(customer_id),
         )
+    _LOGGER.debug(
+        "Completed book_tee_time request.",
+        extra={
+            "call_id": request.call_id,
+            "confirmation_code": reservation.confirmation_code,
+            "reservation_id": reservation.reservation_id,
+        },
+    )
 
     return schemas.BookTeeTimeResponse(
         confirmation_code=reservation.confirmation_code,
@@ -218,6 +258,15 @@ async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depen
 async def modify_reservation(
     request: schemas.ModifyReservationRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling modify_reservation request.",
+        extra={
+            "call_id": request.call_id,
+            "confirmation_code": request.confirmation_code,
+            "idempotency_key": request.idempotency_key,
+            "change_fields": sorted(request.changes.model_dump(exclude_none=True).keys()),
+        },
+    )
     # Modifications are writes; enforce the same read-only gate as booking/cancel.
     require_writable_db()
     normalized_changes = normalize_modify_changes(request)
@@ -231,7 +280,15 @@ async def modify_reservation(
             call_id=request.call_id,
         )
         if not updated:
+            _LOGGER.debug(
+                "modify_reservation request failed: reservation not found.",
+                extra={"call_id": request.call_id, "confirmation_code": request.confirmation_code},
+            )
             raise HTTPException(status_code=404, detail="Reservation not found")
+    _LOGGER.debug(
+        "Completed modify_reservation request.",
+        extra={"call_id": request.call_id, "confirmation_code": updated.confirmation_code},
+    )
 
     return schemas.ModifyReservationResponse(
         confirmation_code=updated.confirmation_code,
@@ -245,6 +302,14 @@ async def modify_reservation(
 async def cancel_reservation(
     request: schemas.CancelReservationRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling cancel_reservation request.",
+        extra={
+            "call_id": request.call_id,
+            "confirmation_code": request.confirmation_code,
+            "idempotency_key": request.idempotency_key,
+        },
+    )
     # Cancellation mutates reservation status and audit history.
     require_writable_db()
 
@@ -256,7 +321,15 @@ async def cancel_reservation(
             request.call_id,
         )
         if not updated:
+            _LOGGER.debug(
+                "cancel_reservation request failed: reservation not found.",
+                extra={"call_id": request.call_id, "confirmation_code": request.confirmation_code},
+            )
             raise HTTPException(status_code=404, detail="Reservation not found")
+    _LOGGER.debug(
+        "Completed cancel_reservation request.",
+        extra={"call_id": request.call_id, "confirmation_code": updated.confirmation_code},
+    )
 
     return schemas.CancelReservationResponse(
         confirmation_code=updated.confirmation_code,
@@ -275,9 +348,17 @@ async def cancel_reservation(
 async def get_reservation_details(
     request: schemas.GetReservationDetailsRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling get_reservation_details request.",
+        extra={"call_id": request.call_id, "confirmation_code": request.confirmation_code},
+    )
     # Read-only lookup with consistent 404 behavior.
     async with get_conn() as conn:
         reservation = await get_reservation_or_404(conn, request.confirmation_code)
+    _LOGGER.debug(
+        "Completed get_reservation_details request.",
+        extra={"call_id": request.call_id, "confirmation_code": reservation.confirmation_code},
+    )
 
     return schemas.GetReservationDetailsResponse(reservation=reservation)
 
@@ -291,6 +372,16 @@ async def get_reservation_details(
 async def quote_reservation_change(
     request: schemas.QuoteReservationChangeRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling quote_reservation_change request.",
+        extra={
+            "call_id": request.call_id,
+            "confirmation_code": request.confirmation_code,
+            "new_slot_id": request.new_slot_id,
+            "new_players": request.new_players,
+            "new_reservation_type": request.new_reservation_type,
+        },
+    )
     # Quote mode never mutates data; it only evaluates feasibility.
     async with get_conn() as conn:
         current = await get_reservation_or_404(conn, request.confirmation_code)
@@ -332,6 +423,10 @@ async def quote_reservation_change(
 async def check_slot_capacity(
     request: schemas.CheckSlotCapacityRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling check_slot_capacity request.",
+        extra={"call_id": request.call_id, "slot_id": request.slot_id, "players": request.players},
+    )
     # Simple capacity probe for callers that already know the slot identifier.
     async with get_conn() as conn:
         slot = await fetch_slot_by_id(conn, request.slot_id)
@@ -356,6 +451,10 @@ async def check_slot_capacity(
 async def send_sms_confirmation(
     request: schemas.SendSmsConfirmationRequest, _auth: None = Depends(require_auth)
 ):
+    _LOGGER.debug(
+        "Handling send_sms_confirmation request.",
+        extra={"call_id": request.call_id, "confirmation_code": request.confirmation_code},
+    )
     # Placeholder endpoint: currently reports queuing intent without external SMS I/O.
     return schemas.SendSmsConfirmationResponse(
         status="queued",

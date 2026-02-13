@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -17,6 +18,7 @@ from ..observability.logger import DbLogger
 from shared import schemas
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+_LOGGER = logging.getLogger(__name__)
 
 
 class BackendMCPServer(MCPServer):
@@ -33,6 +35,10 @@ class BackendMCPServer(MCPServer):
         self._client = client
         self._logger = logger
         self._call_id: str | None = logger.call_id if logger else None
+        _LOGGER.debug(
+            "BackendMCPServer initialized.",
+            extra={"has_logger": logger is not None, "call_id": self._call_id},
+        )
 
         # Centralized dispatch table keeps routing logic simple and testable.
         self._tool_dispatch: dict[str, ToolHandler] = {
@@ -54,6 +60,10 @@ class BackendMCPServer(MCPServer):
         """
         self._logger = logger
         self._call_id = logger.call_id if logger else self._call_id
+        _LOGGER.debug(
+            "BackendMCPServer logger updated.",
+            extra={"has_logger": logger is not None, "call_id": self._call_id},
+        )
 
     def set_call_id(self, call_id: str | None) -> None:
         """Binds a call id used to auto-populate tool request payloads.
@@ -62,9 +72,11 @@ class BackendMCPServer(MCPServer):
             call_id: Current Twilio call id.
         """
         self._call_id = call_id
+        _LOGGER.debug("BackendMCPServer call_id updated.", extra={"call_id": call_id})
 
     async def connect(self) -> None:
         """No-op MCP connect hook for compatibility with MCPServer interface."""
+        _LOGGER.debug("BackendMCPServer.connect() called.")
         return None
 
     @property
@@ -74,6 +86,7 @@ class BackendMCPServer(MCPServer):
 
     async def cleanup(self) -> None:
         """Closes the underlying backend client."""
+        _LOGGER.debug("BackendMCPServer.cleanup() closing backend client.")
         await self._client.close()
 
     async def list_tools(self, run_context=None, agent=None) -> list[MCPTool]:
@@ -87,6 +100,7 @@ class BackendMCPServer(MCPServer):
             MCP tool definitions exposed to the agent.
         """
         del run_context, agent
+        _LOGGER.debug("BackendMCPServer.list_tools() called.")
         return [
             MCPTool(
                 name="search_tee_times",
@@ -140,15 +154,27 @@ class BackendMCPServer(MCPServer):
         Returns:
             MCP call result with both text and structured payloads.
         """
+        _LOGGER.debug(
+            "BackendMCPServer.call_tool() invoked.",
+            extra={"tool_name": tool_name, "has_arguments": arguments is not None, "call_id": self._call_id},
+        )
         args = self._inject_call_id(arguments or {})
         result: dict[str, Any]
         error_message: str | None = None
 
         try:
             result = await self._dispatch_tool(tool_name, args)
+            _LOGGER.debug(
+                "BackendMCPServer.call_tool() succeeded.",
+                extra={"tool_name": tool_name, "result_keys": sorted(result.keys()) if isinstance(result, dict) else None},
+            )
         except Exception as exc:
             error_message = str(exc)
             result = {"error": error_message}
+            _LOGGER.debug(
+                "BackendMCPServer.call_tool() failed.",
+                extra={"tool_name": tool_name, "error_message": error_message},
+            )
 
         if self._logger:
             await self._logger.log_mcp_call(
@@ -202,6 +228,10 @@ class BackendMCPServer(MCPServer):
         args = dict(arguments)
         if self._call_id and not args.get("call_id"):
             args["call_id"] = self._call_id
+            _LOGGER.debug(
+                "Injected call_id into MCP tool arguments.",
+                extra={"call_id": self._call_id},
+            )
         return args
 
     async def _dispatch_tool(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -219,5 +249,7 @@ class BackendMCPServer(MCPServer):
         """
         handler = self._tool_dispatch.get(tool_name)
         if handler is None:
+            _LOGGER.debug("Unknown MCP tool requested.", extra={"tool_name": tool_name})
             raise ValueError(f"Unknown tool: {tool_name}")
+        _LOGGER.debug("Dispatching MCP tool call to backend client.", extra={"tool_name": tool_name})
         return await handler(args)

@@ -1,14 +1,16 @@
-from __future__ import annotations
-
 """Database pool and connection helpers for backend request handlers."""
 
+from __future__ import annotations
+
 import contextlib
+import logging
 from typing import AsyncIterator
 
 import asyncpg
 
 from .config import settings
 
+_LOGGER = logging.getLogger(__name__)
 
 _pool: asyncpg.Pool | None = None
 
@@ -21,17 +23,23 @@ async def init_pool() -> asyncpg.Pool:
     """
     global _pool
     if _pool is None:
+        _LOGGER.debug("Creating backend DB pool.", extra={"max_size": settings.DB_POOL_MAX})
         _pool = await asyncpg.create_pool(
             settings.DB_CONNECTION_STRING,
             max_size=settings.DB_POOL_MAX,
         )
+        _LOGGER.debug("Backend DB pool created.")
+    else:
+        _LOGGER.debug("Reusing existing backend DB pool.")
     return _pool
 
 
 async def get_pool() -> asyncpg.Pool:
     """Returns the shared asyncpg pool, creating it lazily if required."""
     if _pool is None:
+        _LOGGER.debug("Backend DB pool not initialized; calling init_pool().")
         return await init_pool()
+    _LOGGER.debug("Returning initialized backend DB pool.")
     return _pool
 
 
@@ -39,9 +47,12 @@ async def close_pool() -> None:
     """Closes the shared asyncpg pool during application shutdown."""
     global _pool
     if _pool is None:
+        _LOGGER.debug("Backend DB pool close requested with no active pool.")
         return
+    _LOGGER.debug("Closing backend DB pool.")
     await _pool.close()
     _pool = None
+    _LOGGER.debug("Backend DB pool closed.")
 
 
 @contextlib.asynccontextmanager

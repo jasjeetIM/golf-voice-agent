@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Reservation data access for tee time management."""
+
+from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any, Literal

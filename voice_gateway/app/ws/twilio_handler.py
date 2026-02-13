@@ -107,6 +107,23 @@ class TwilioHandler:
         # Maps ``(tool_name, arguments_raw_json)`` to model tool call ids so we
         # can match ``tool_end`` rows back to the corresponding ``tool_start``.
         self._pending_tool_calls: dict[tuple[str, str], list[str]] = {}
+        self._media_frame_count = 0
+        self._audio_flush_count = 0
+        self._twilio_send_count = 0
+        client = getattr(websocket, "client", None)
+        ws_url = getattr(websocket, "url", None)
+        _LOGGER.debug(
+            "TwilioHandler initialized.",
+            extra={"client": str(client), "path": getattr(ws_url, "path", None)},
+        )
+
+    def _should_log_stream_detail(self) -> bool:
+        """Returns whether per-frame stream debug logging is enabled."""
+        return settings.VERBOSE_TWILIO_STREAM_LOGGING
+
+    def _is_sample_boundary(self, count: int) -> bool:
+        """Returns True when count lands on configured sampling boundary."""
+        return count % settings.TWILIO_STREAM_LOG_SAMPLE_EVERY_N == 0
 
     async def start(self) -> None:
         """Starts realtime session and websocket background loops.
@@ -128,17 +145,23 @@ class TwilioHandler:
         Raises:
             ValueError: If ``OPENAI_API_KEY`` is not configured.
         """
+        _LOGGER.debug("TwilioHandler.start() entered.")
         # Tool calls from the model are proxied through this client/server pair.
         self._backend_client = BackendClient(settings.backend_url, settings.BACKEND_API_KEY)
+        _LOGGER.debug("BackendClient initialized for TwilioHandler.", extra={"backend_url": settings.backend_url})
         self._mcp_server = BackendMCPServer(self._backend_client, logger=self._logger)
+        _LOGGER.debug("BackendMCPServer initialized for TwilioHandler.")
         agent = create_agent(self._mcp_server)
+        _LOGGER.debug("Realtime agent created from MCP server.")
 
         # Fail fast before opening transports if required credentials are absent.
         if not settings.OPENAI_API_KEY:
+            _LOGGER.debug("OPENAI_API_KEY missing during TwilioHandler startup.")
             raise ValueError("OPENAI_API_KEY is required")
 
         # Create and enter realtime session before accepting websocket messages.
         runner = RealtimeRunner(agent)
+        _LOGGER.debug("RealtimeRunner created; opening realtime session.")
         self.session = await runner.run(
             model_config={
                 "api_key": settings.OPENAI_API_KEY,
@@ -156,15 +179,26 @@ class TwilioHandler:
                 "playback_tracker": self.playback_tracker,
             }
         )
+        _LOGGER.debug("Realtime session created; entering session context.")
         await self.session.enter()
+        _LOGGER.debug("Realtime session entered successfully.")
 
         # Accept websocket only after session is ready to consume audio.
         await self.websocket.accept()
+        _LOGGER.debug("Twilio websocket accepted by TwilioHandler.")
 
         # Start all concurrent loops that drive streaming behavior.
         self._realtime_loop_task = asyncio.create_task(self._realtime_session_loop())
         self._message_loop_task = asyncio.create_task(self._twilio_message_loop())
         self._buffer_flush_task = asyncio.create_task(self._buffer_flush_loop())
+        _LOGGER.debug(
+            "TwilioHandler background tasks started.",
+            extra={
+                "realtime_task": bool(self._realtime_loop_task),
+                "message_task": bool(self._message_loop_task),
+                "buffer_task": bool(self._buffer_flush_task),
+            },
+        )
 
     async def wait_until_done(self) -> None:
         """Waits on Twilio websocket message consumption until call ends.
@@ -177,10 +211,13 @@ class TwilioHandler:
         method always calls ``shutdown()`` in ``finally`` to guarantee cleanup.
         """
         if not self._message_loop_task:
+            _LOGGER.debug("TwilioHandler.wait_until_done() called before start; returning early.")
             return
         try:
+            _LOGGER.debug("TwilioHandler waiting for message loop task completion.")
             await self._message_loop_task
         finally:
+            _LOGGER.debug("TwilioHandler.wait_until_done() finalizing via shutdown().")
             await self.shutdown()
 
     async def shutdown(self) -> None:
@@ -199,26 +236,36 @@ class TwilioHandler:
         5. Close websocket (if still connected).
         """
         if self._is_shutting_down:
+            _LOGGER.debug("TwilioHandler.shutdown() called while already shutting down.")
             return
         self._is_shutting_down = True
+        _LOGGER.debug(
+            "TwilioHandler shutdown started.",
+            extra={"call_id": self._call_id, "stream_sid": self._stream_sid},
+        )
 
         # Stop realtime transport first so it cannot enqueue new work.
         if self.session:
             with contextlib.suppress(Exception):
+                _LOGGER.debug("Closing realtime session during shutdown.")
                 await self.session.close()
 
         # Ensure all loop tasks exit before releasing network resources.
         await self._cancel_background_tasks()
+        _LOGGER.debug("TwilioHandler background tasks cancelled and drained.")
 
         # Release backend HTTP connection pool resources.
         if self._backend_client:
             with contextlib.suppress(Exception):
+                _LOGGER.debug("Closing backend client during shutdown.")
                 await self._backend_client.close()
 
         # Close Twilio websocket if it has not already disconnected.
         if self.websocket.client_state != WebSocketState.DISCONNECTED:
             with contextlib.suppress(Exception):
+                _LOGGER.debug("Closing websocket transport during shutdown.")
                 await self.websocket.close()
+        _LOGGER.debug("TwilioHandler shutdown completed.")
 
     async def _cancel_background_tasks(self) -> None:
         """Cancels and awaits all handler-owned background tasks.
@@ -228,6 +275,14 @@ class TwilioHandler:
         """
         current = asyncio.current_task()
         tasks = [self._realtime_loop_task, self._message_loop_task, self._buffer_flush_task]
+        _LOGGER.debug(
+            "Cancelling TwilioHandler background tasks.",
+            extra={
+                "realtime_done": self._realtime_loop_task.done() if self._realtime_loop_task else None,
+                "message_done": self._message_loop_task.done() if self._message_loop_task else None,
+                "buffer_done": self._buffer_flush_task.done() if self._buffer_flush_task else None,
+            },
+        )
 
         # Signal cancellation.
         for task in tasks:
@@ -246,10 +301,13 @@ class TwilioHandler:
         This loop drives assistant output to Twilio and session-level logging.
         """
         assert self.session is not None
+        _LOGGER.debug("Realtime session loop started.")
         try:
             async for event in self.session:
+                _LOGGER.debug("Realtime event received.", extra={"event_type": event.type})
                 await self._handle_realtime_event(event)
         except asyncio.CancelledError:
+            _LOGGER.debug("Realtime session loop cancelled.")
             raise
         except Exception:
             _LOGGER.exception("Realtime session loop failed.")
@@ -262,17 +320,26 @@ class TwilioHandler:
         This is the "source of truth" loop for call liveness because it waits
         directly on Twilio frames.
         """
+        _LOGGER.debug("Twilio message loop started.")
         try:
             while not self._is_shutting_down:
                 message_text = await self.websocket.receive_text()
+                if self._should_log_stream_detail():
+                    _LOGGER.debug(
+                        "Raw Twilio websocket message received.",
+                        extra={"bytes": len(message_text)},
+                    )
                 try:
                     message = json.loads(message_text)
                 except json.JSONDecodeError:
                     _LOGGER.warning("Received non-JSON message from Twilio.")
                     await self._log_internal_error("invalid_twilio_message_json")
                     continue
+                if self._should_log_stream_detail():
+                    _LOGGER.debug("Parsed Twilio message.", extra={"event_type": message.get("event")})
                 await self._handle_twilio_message(message)
         except asyncio.CancelledError:
+            _LOGGER.debug("Twilio message loop cancelled.")
             raise
         except WebSocketDisconnect:
             _LOGGER.info("Twilio websocket disconnected.")
@@ -287,6 +354,10 @@ class TwilioHandler:
         Args:
             event: Realtime event emitted by the OpenAI session.
         """
+        _LOGGER.debug(
+            "Handling realtime event.",
+            extra={"event_type": event.type, "call_id": self._call_id, "session_id": self._session_id},
+        )
         # Capture session id early so all subsequent logs include it.
         self._capture_session_id_from_event(event)
 
@@ -315,6 +386,10 @@ class TwilioHandler:
                     "media": {"payload": base64_audio},
                 }
             )
+            _LOGGER.debug(
+                "Forwarded model audio to Twilio.",
+                extra={"stream_sid": self._stream_sid, "bytes": len(event.audio.data)},
+            )
 
             # Store mark metadata so future Twilio mark acknowledgements can be
             # translated into playback tracker progress.
@@ -332,6 +407,10 @@ class TwilioHandler:
                     "mark": {"name": mark_id},
                 }
             )
+            _LOGGER.debug(
+                "Sent Twilio mark event for playback tracking.",
+                extra={"mark_id": mark_id, "stream_sid": self._stream_sid},
+            )
         elif event.type == "audio_interrupted":
             if not self._stream_sid:
                 return
@@ -343,6 +422,7 @@ class TwilioHandler:
                 source="OPENAI",
             )
             await self._send_twilio_json({"event": "clear", "streamSid": self._stream_sid})
+            _LOGGER.debug("Sent Twilio clear event after audio interruption.")
 
     async def _handle_twilio_message(self, message: dict[str, Any]) -> None:
         """Routes inbound Twilio event payloads by event type.
@@ -351,6 +431,8 @@ class TwilioHandler:
             message: Parsed Twilio websocket JSON event.
         """
         event = message.get("event")
+        if event != "media" or self._should_log_stream_detail():
+            _LOGGER.debug("Routing Twilio event.", extra={"event_type": event, "call_id": self._call_id})
 
         # Log every inbound frame category for call-level auditing.
         await self._try_log_call_event(
@@ -370,6 +452,7 @@ class TwilioHandler:
             await self._handle_mark_event(message)
             return
         if event == "stop":
+            _LOGGER.debug("Twilio stop event received; initiating shutdown.")
             await self.shutdown()
 
     async def _handle_start_event(self, message: dict[str, Any]) -> None:
@@ -381,9 +464,14 @@ class TwilioHandler:
         start_data = message.get("start", {})
         self._stream_sid = start_data.get("streamSid")
         call_sid = start_data.get("callSid")
+        _LOGGER.debug(
+            "Processing Twilio start event.",
+            extra={"stream_sid": self._stream_sid, "call_sid": call_sid},
+        )
 
         # Without callSid, we cannot bind call-level logging or tool context.
         if not call_sid:
+            _LOGGER.debug("Twilio start event missing callSid; logger context not initialized.")
             return
 
         # Create per-call logger and wire the same call context into MCP tools.
@@ -392,18 +480,21 @@ class TwilioHandler:
         if self._mcp_server:
             self._mcp_server.set_logger(self._logger)
             self._mcp_server.set_call_id(call_sid)
+            _LOGGER.debug("Attached DbLogger and call_id to MCP server.", extra={"call_id": call_sid})
 
         # Ensure the parent call row exists before appending child event rows.
         await self._logger.ensure_call(
             from_number=start_data.get("customParameters", {}).get("from", ""),
             to_number=start_data.get("customParameters", {}).get("to", ""),
         )
+        _LOGGER.debug("Ensured call row exists in observability DB.", extra={"call_id": call_sid})
         await self._logger.log_call_event(
             event_type="start",
             payload=message,
             direction="IN",
             source="TWILIO",
         )
+        _LOGGER.debug("Persisted Twilio start event to observability DB.", extra={"call_id": call_sid})
 
     async def _handle_media_event(self, message: dict[str, Any]) -> None:
         """Buffers caller media payloads and flushes fixed-size chunks.
@@ -414,6 +505,10 @@ class TwilioHandler:
         media = message.get("media", {})
         payload = media.get("payload", "")
         if not payload or not self.session:
+            _LOGGER.debug(
+                "Skipping media event due to missing payload or inactive session.",
+                extra={"has_payload": bool(payload), "session_active": self.session is not None},
+            )
             return
 
         # Reject malformed base64 to avoid crashing the message loop.
@@ -425,7 +520,23 @@ class TwilioHandler:
             return
 
         self._audio_buffer.extend(ulaw_bytes)
+        self._media_frame_count += 1
+        if self._should_log_stream_detail():
+            _LOGGER.debug(
+                "Buffered incoming caller audio chunk.",
+                extra={"chunk_bytes": len(ulaw_bytes), "buffer_bytes": len(self._audio_buffer)},
+            )
+        elif self._is_sample_boundary(self._media_frame_count):
+            _LOGGER.debug(
+                "Twilio media frames processed.",
+                extra={
+                    "media_frame_count": self._media_frame_count,
+                    "buffer_bytes": len(self._audio_buffer),
+                },
+            )
         if len(self._audio_buffer) >= self.BUFFER_SIZE_BYTES:
+            if self._should_log_stream_detail():
+                _LOGGER.debug("Audio buffer reached flush threshold; flushing now.")
             await self._flush_audio_buffer()
 
     async def _handle_mark_event(self, message: dict[str, Any]) -> None:
@@ -436,19 +547,36 @@ class TwilioHandler:
         """
         mark_data = message.get("mark", {})
         mark_id = mark_data.get("name", "")
+        _LOGGER.debug("Processing Twilio mark acknowledgment.", extra={"mark_id": mark_id})
         if mark_id in self._mark_data:
             item_id, item_content_index, byte_count = self._mark_data[mark_id]
             audio_bytes = b"\x00" * byte_count
             self.playback_tracker.on_play_bytes(item_id, item_content_index, audio_bytes)
             del self._mark_data[mark_id]
+            _LOGGER.debug(
+                "Applied playback tracker bytes for Twilio mark.",
+                extra={"mark_id": mark_id, "item_id": item_id, "byte_count": byte_count},
+            )
 
     async def _flush_audio_buffer(self) -> None:
         """Flushes buffered caller audio into the realtime session."""
         if not self._audio_buffer or not self.session:
+            _LOGGER.debug(
+                "Skipping audio buffer flush; no buffered data or inactive session.",
+                extra={"buffer_bytes": len(self._audio_buffer), "session_active": self.session is not None},
+            )
             return
         buffer_data = bytes(self._audio_buffer)
         self._audio_buffer.clear()
         self._last_buffer_send_time = time.time()
+        self._audio_flush_count += 1
+        if self._should_log_stream_detail():
+            _LOGGER.debug("Sending buffered audio to realtime session.", extra={"bytes": len(buffer_data)})
+        elif self._is_sample_boundary(self._audio_flush_count):
+            _LOGGER.debug(
+                "Flushed buffered audio to realtime session.",
+                extra={"audio_flush_count": self._audio_flush_count, "bytes": len(buffer_data)},
+            )
         await self.session.send_audio(buffer_data)
 
     async def _buffer_flush_loop(self) -> None:
@@ -457,13 +585,19 @@ class TwilioHandler:
         This loop prevents short trailing audio fragments from waiting forever
         when the buffer never reaches ``BUFFER_SIZE_BYTES``.
         """
+        _LOGGER.debug("Audio buffer flush loop started.")
         try:
             while not self._is_shutting_down:
                 await asyncio.sleep(self.CHUNK_LENGTH_S)
                 stale_buffer = time.time() - self._last_buffer_send_time > self.CHUNK_LENGTH_S * 2
                 if self._audio_buffer and stale_buffer:
+                    _LOGGER.debug(
+                        "Detected stale audio buffer; forcing flush.",
+                        extra={"buffer_bytes": len(self._audio_buffer)},
+                    )
                     await self._flush_audio_buffer()
         except asyncio.CancelledError:
+            _LOGGER.debug("Audio buffer flush loop cancelled.")
             raise
         except Exception:
             _LOGGER.exception("Audio buffer flush loop failed.")
@@ -476,6 +610,18 @@ class TwilioHandler:
         Args:
             payload: JSON-serializable Twilio frame.
         """
+        self._twilio_send_count += 1
+        event_type = payload.get("event")
+        if self._should_log_stream_detail() or event_type not in {"media", "mark"}:
+            _LOGGER.debug(
+                "Sending Twilio websocket message.",
+                extra={"event_type": event_type, "stream_sid": payload.get("streamSid")},
+            )
+        elif self._is_sample_boundary(self._twilio_send_count):
+            _LOGGER.debug(
+                "Sent Twilio stream frames.",
+                extra={"twilio_send_count": self._twilio_send_count, "event_type": event_type},
+            )
         await self.websocket.send_text(json.dumps(payload))
 
     async def _try_log_call_event(
@@ -495,7 +641,19 @@ class TwilioHandler:
             source: Source system (for example ``TWILIO`` or ``OPENAI``).
         """
         if not self._logger:
+            if self._should_log_stream_detail():
+                _LOGGER.debug("Skipping call-event DB write because logger context is not yet initialized.")
             return
+        if event_type != "media" or self._should_log_stream_detail():
+            _LOGGER.debug(
+                "Persisting call event to DB.",
+                extra={
+                    "event_type": event_type,
+                    "direction": direction,
+                    "source": source,
+                    "call_id": self._call_id,
+                },
+            )
         await self._logger.log_call_event(
             event_type=event_type,
             payload=payload,
@@ -523,6 +681,7 @@ class TwilioHandler:
             event: Realtime session event to log.
         """
         if not self._logger:
+            _LOGGER.debug("Skipping session-event DB write because logger context is not yet initialized.")
             return
 
         def _safe_json_loads(data: str | None) -> dict[str, Any]:
@@ -641,6 +800,10 @@ class TwilioHandler:
             tool_call_id=tool_call_id,
             agent_name=agent_name,
         )
+        _LOGGER.debug(
+            "Persisted session event to DB.",
+            extra={"event_type": event.type, "direction": direction, "call_id": self._call_id},
+        )
 
     @staticmethod
     def _extract_session_id(raw_event: Any) -> str | None:
@@ -686,5 +849,10 @@ class TwilioHandler:
             return
 
         self._session_id = session_id
+        _LOGGER.debug("Captured realtime session id from model event.", extra={"session_id": session_id})
         if self._logger:
             self._logger.set_session_id(session_id)
+            _LOGGER.debug(
+                "Updated DbLogger session context after session-id capture.",
+                extra={"call_id": self._call_id, "session_id": session_id},
+            )

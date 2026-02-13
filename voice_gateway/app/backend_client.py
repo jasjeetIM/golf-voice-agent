@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 import httpx
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class BackendClient:
@@ -46,13 +50,36 @@ class BackendClient:
         Returns:
             Parsed JSON response body.
         """
+        started = time.monotonic()
+        _LOGGER.debug(
+            "Starting backend tool HTTP request.",
+            extra={
+                "path": path,
+                "payload_keys": sorted(payload.keys()),
+                "call_id": payload.get("call_id"),
+            },
+        )
         response = await self._client.post(
             f"{self.base_url}{path}",
             json=payload,
             headers=self._auth_headers(),
         )
+        latency_ms = int((time.monotonic() - started) * 1000)
+        _LOGGER.debug(
+            "Backend tool HTTP response received.",
+            extra={
+                "path": path,
+                "status_code": response.status_code,
+                "latency_ms": latency_ms,
+            },
+        )
         response.raise_for_status()
-        return response.json()
+        body = response.json()
+        _LOGGER.debug(
+            "Parsed backend tool HTTP response body.",
+            extra={"path": path, "response_keys": sorted(body.keys()) if isinstance(body, dict) else None},
+        )
+        return body
 
     async def search_tee_times(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Calls backend search tee-times endpoint."""
@@ -88,4 +115,5 @@ class BackendClient:
 
     async def close(self) -> None:
         """Closes the underlying HTTP client and frees connection resources."""
+        _LOGGER.debug("Closing BackendClient HTTP session.")
         await self._client.aclose()

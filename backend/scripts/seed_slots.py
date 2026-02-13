@@ -1,38 +1,30 @@
-from __future__ import annotations
-
 """Seeds demo golf course tee-time slots for local development.
 
 This script inserts (or updates) a demo course and its upcoming tee-time slots.
+It must be run from the root dir of the project as shown below.
+
+Usage: 
+    python -m backend.scripts.seed_slots
+    
 """
 
+from __future__ import annotations
+
 import asyncio
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import asyncpg
 
-
-DEFAULT_DB_CONNECTION_STRING = "postgresql://postgres:postgres@localhost:5432/golf"
-DEFAULT_COURSE_ID = "0"
-DEFAULT_COURSE_NAME = "Demo Course 0"
-DEFAULT_COURSE_TIMEZONE = "America/New_York"
-DEFAULT_TEE_TIME_START_HOUR = 7
-DEFAULT_TEE_TIME_END_HOUR = 15
-DEFAULT_SLOT_INTERVAL_MINUTES = 12
-DEFAULT_FORWARD_DAYS = 14
-DEFAULT_CAPACITY_PLAYERS = 4
-DEFAULT_REGULAR_PRICE_CENTS = 10000
-DEFAULT_TWILIGHT_PRICE_CENTS = 5000
-DEFAULT_TWILIGHT_START_HOUR = 15
-
+from backend.app.config import settings as backend_settings
 
 @dataclass(frozen=True)
 class SeedConfig:
     """Runtime configuration for tee-time slot seeding."""
 
     db_connection_string: str
+    db_pool_max: int
     course_id: str
     course_name: str
     course_timezone: str
@@ -46,72 +38,28 @@ class SeedConfig:
     twilight_start_hour: int
 
     @classmethod
-    def from_env(cls) -> "SeedConfig":
-        """Builds seeding configuration from environment variables."""
+    def from_settings(cls) -> "SeedConfig":
+        """Builds seeding configuration from backend settings.
+
+        The backend settings model sources values from `.env` (plus process
+        environment overrides), so seed behavior stays aligned with runtime
+        service configuration.
+        """
         return cls(
-            db_connection_string=os.getenv(
-                "DB_CONNECTION_STRING",
-                DEFAULT_DB_CONNECTION_STRING,
-            ),
-            course_id=os.getenv("SEED_COURSE_ID", DEFAULT_COURSE_ID),
-            course_name=os.getenv("SEED_COURSE_NAME", DEFAULT_COURSE_NAME),
-            course_timezone=os.getenv("SEED_COURSE_TIMEZONE", DEFAULT_COURSE_TIMEZONE),
-            tee_time_start_hour=_get_env_int(
-                "TEE_TIME_START_HOUR",
-                DEFAULT_TEE_TIME_START_HOUR,
-            ),
-            tee_time_end_hour=_get_env_int(
-                "TEE_TIME_END_HOUR",
-                DEFAULT_TEE_TIME_END_HOUR,
-            ),
-            slot_interval_minutes=_get_env_int(
-                "SLOT_INTERVAL_MINUTES",
-                DEFAULT_SLOT_INTERVAL_MINUTES,
-            ),
-            forward_days=_get_env_int(
-                "FORWARD_OPEN_TEE_TIME_DAYS",
-                DEFAULT_FORWARD_DAYS,
-            ),
-            capacity_players=_get_env_int(
-                "SLOT_CAPACITY_PLAYERS",
-                DEFAULT_CAPACITY_PLAYERS,
-            ),
-            regular_price_cents=_get_env_int(
-                "REGULAR_PRICE_CENTS",
-                DEFAULT_REGULAR_PRICE_CENTS,
-            ),
-            twilight_price_cents=_get_env_int(
-                "TWILIGHT_PRICE_CENTS",
-                DEFAULT_TWILIGHT_PRICE_CENTS,
-            ),
-            twilight_start_hour=_get_env_int(
-                "TWILIGHT_START_HOUR",
-                DEFAULT_TWILIGHT_START_HOUR,
-            ),
+            db_connection_string=backend_settings.DB_CONNECTION_STRING,
+            db_pool_max=backend_settings.DB_POOL_MAX,
+            course_id=backend_settings.SEED_COURSE_ID,
+            course_name=backend_settings.SEED_COURSE_NAME,
+            course_timezone=backend_settings.SEED_COURSE_TIMEZONE,
+            tee_time_start_hour=backend_settings.TEE_TIME_START_HOUR,
+            tee_time_end_hour=backend_settings.TEE_TIME_END_HOUR,
+            slot_interval_minutes=backend_settings.SLOT_INTERVAL_MINUTES,
+            forward_days=backend_settings.FORWARD_OPEN_TEE_TIME_DAYS,
+            capacity_players=backend_settings.SLOT_CAPACITY_PLAYERS,
+            regular_price_cents=backend_settings.REGULAR_PRICE_CENTS,
+            twilight_price_cents=backend_settings.TWILIGHT_PRICE_CENTS,
+            twilight_start_hour=backend_settings.TWILIGHT_START_HOUR,
         )
-
-
-def _get_env_int(name: str, default: int) -> int:
-    """Reads an integer environment variable with validation.
-
-    Args:
-        name: Environment variable name.
-        default: Fallback value when the variable is missing.
-
-    Returns:
-        Parsed integer value.
-
-    Raises:
-        ValueError: If the configured value is not a valid integer.
-    """
-    raw_value = os.getenv(name)
-    if raw_value is None:
-        return default
-
-    try:
-        return int(raw_value)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer, got: {raw_value}") from exc
 
 
 def validate_config(config: SeedConfig) -> None:
@@ -131,6 +79,8 @@ def validate_config(config: SeedConfig) -> None:
         raise ValueError("TEE_TIME_END_HOUR must be >= TEE_TIME_START_HOUR")
     if config.slot_interval_minutes <= 0:
         raise ValueError("SLOT_INTERVAL_MINUTES must be > 0")
+    if config.db_pool_max <= 0:
+        raise ValueError("DB_POOL_MAX must be > 0")
     if config.forward_days <= 0:
         raise ValueError("FORWARD_OPEN_TEE_TIME_DAYS must be > 0")
     if config.capacity_players <= 0:
@@ -257,10 +207,13 @@ def build_summary(config: SeedConfig, total: int) -> str:
 
 async def main() -> None:
     """Entry point for CLI execution."""
-    config = SeedConfig.from_env()
+    config = SeedConfig.from_settings()
     validate_config(config)
 
-    pool = await asyncpg.create_pool(config.db_connection_string)
+    pool = await asyncpg.create_pool(
+        dsn=config.db_connection_string,
+        max_size=config.db_pool_max,
+    )
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():

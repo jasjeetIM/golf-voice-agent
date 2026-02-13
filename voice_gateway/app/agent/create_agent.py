@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from agents.realtime import RealtimeAgent
 
 from ..mcp.backend_server import BackendMCPServer
+
+_LOGGER = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     "You are a respectful, friendly, and efficient Golf Pro Shop associate answering phone calls.\n"
@@ -29,23 +32,30 @@ SYSTEM_PROMPT = (
 
 
 def build_instructions() -> str:
+    """Builds dynamic agent instructions with current-date context."""
     today = datetime.utcnow().date().isoformat()
     policy_parts = [
         "Always collect: date, time, players, name, phone.",
         "Never ask for payment or credit card details.",
     ]
-    return "\n".join(
+    instructions = "\n".join(
         [
             f"Today is {today}. Use this to resolve relative dates (e.g., 'tomorrow').",
             SYSTEM_PROMPT,
             " ".join(policy_parts),
         ]
     )
+    _LOGGER.debug("Built realtime agent instructions.", extra={"today": today, "length": len(instructions)})
+    return instructions
 
 
 def create_agent(server: BackendMCPServer) -> RealtimeAgent:
-    return RealtimeAgent(
+    """Creates the realtime agent bound to the backend MCP server."""
+    _LOGGER.debug("Creating realtime agent instance.")
+    agent = RealtimeAgent(
         name="Golf Voice Agent",
         instructions=build_instructions(),
         mcp_servers=[server],
     )
+    _LOGGER.debug("Realtime agent created.", extra={"agent_name": agent.name})
+    return agent
