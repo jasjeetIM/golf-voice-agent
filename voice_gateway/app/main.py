@@ -336,9 +336,30 @@ async def inbound(request: Request) -> PlainTextResponse:
             detail="Invalid Twilio request signature.",
         )
 
+    from_number = ""
+    to_number = ""
+    if request.method.upper() == "POST":
+        form = await request.form()
+        from_number = str(form.get("From") or "")
+        to_number = str(form.get("To") or "")
+    else:
+        from_number = request.query_params.get("From", "")
+        to_number = request.query_params.get("To", "")
+
     ws_url = f"{settings.public_stream_url}/twilio/stream"
-    _LOGGER.debug("Building TwiML response for inbound call.", extra={"stream_url": ws_url})
-    twiml = build_connect_stream_twiml(ws_url)
+    _LOGGER.debug(
+        "Building TwiML response for inbound call.",
+        extra={
+            "stream_url": ws_url,
+            "has_from_number": bool(from_number),
+            "has_to_number": bool(to_number),
+        },
+    )
+    twiml = build_connect_stream_twiml(
+        ws_url,
+        from_number=from_number,
+        to_number=to_number,
+    )
     _LOGGER.debug("Returning TwiML response to Twilio.", extra={"twiml_length": len(twiml)})
     return PlainTextResponse(content=twiml, media_type="text/xml")
 

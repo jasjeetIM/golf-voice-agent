@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Header
@@ -87,7 +88,7 @@ def normalize_modify_changes(request: schemas.ModifyReservationRequest) -> dict[
     return normalized_changes
 
 
-async def fetch_slot_by_id(conn: asyncpg.Connection, slot_id: str) -> asyncpg.Record | None:
+async def fetch_slot_by_id(conn: asyncpg.Connection, slot_id: str | UUID) -> asyncpg.Record | None:
     """Fetches a tee-time slot by identifier.
 
     Args:
@@ -114,6 +115,24 @@ async def fetch_course_timezone(conn: asyncpg.Connection, course_id: str) -> str
         Course timezone when found, otherwise ``None``.
     """
     return await conn.fetchval("SELECT timezone FROM courses WHERE course_id = $1", course_id)
+
+
+async def fetch_call_from_number(conn: asyncpg.Connection, call_id: str) -> str | None:
+    """Fetches caller phone number from observability call metadata.
+
+    Args:
+        conn: Active database connection.
+        call_id: Twilio call identifier.
+
+    Returns:
+        Caller E.164 number when available, otherwise ``None``.
+    """
+    try:
+        return await conn.fetchval("SELECT from_number FROM calls WHERE call_id = $1", call_id)
+    except asyncpg.UndefinedTableError:
+        # Some environments may run backend without observability tables.
+        _LOGGER.debug("calls table unavailable while resolving caller number.")
+        return None
 
 
 async def get_reservation_or_404(
@@ -156,25 +175,26 @@ def slot_has_capacity(slot: dict[str, Any] | asyncpg.Record, players: int) -> bo
 async def search_tee_times(
     request: schemas.SearchTeeTimesRequest, _auth: None = Depends(require_auth)
 ):
+    course_id = settings.SEED_COURSE_ID
     _LOGGER.debug(
         "Handling search_tee_times request.",
         extra={
             "call_id": request.call_id,
-            "course_id": request.course_id,
+            "course_id": course_id,
             "date": request.date,
             "players": request.players,
         },
     )
     # Read-only flow: query availability, then attach freshness metadata.
     async with get_conn() as conn:
-        options = await inventory_store.search(conn, request)
-        timezone = await fetch_course_timezone(conn, request.course_id)
+        options = await inventory_store.search(conn, request, course_id=course_id)
+        timezone = await fetch_course_timezone(conn, course_id)
     _LOGGER.debug(
         "Completed search_tee_times request.",
         extra={"call_id": request.call_id, "option_count": len(options), "timezone": timezone},
     )
     return schemas.SearchTeeTimesResponse(
-        course_id=request.course_id,
+        course_id=course_id,
         date=request.date,
         timezone=timezone or "America/New_York",
         options=options,
@@ -213,6 +233,19 @@ async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depen
             raise HTTPException(status_code=409, detail="Slot no longer available")
 
         # Upsert customer so repeated callers keep a single identity record.
+        contact_phone = (request.primary_contact.phone_e164 or "").strip()
+        if not contact_phone and request.call_id:
+            contact_phone = (await fetch_call_from_number(conn, request.call_id) or "").strip()
+            _LOGGER.debug(
+                "Resolved booking phone from call metadata.",
+                extra={"call_id": request.call_id, "resolved_phone": bool(contact_phone)},
+            )
+        if not contact_phone:
+            raise HTTPException(
+                status_code=422,
+                detail="primary_contact.phone_e164 is required when caller phone is unavailable",
+            )
+
         customer_row = await conn.fetchrow(
             """
             INSERT INTO customers (phone_e164, full_name)
@@ -220,7 +253,7 @@ async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depen
             ON CONFLICT (phone_e164) DO UPDATE SET full_name = EXCLUDED.full_name
             RETURNING customer_id
             """,
-            request.primary_contact.phone_e164,
+            contact_phone,
             request.primary_contact.name,
         )
         customer_id = customer_row["customer_id"]

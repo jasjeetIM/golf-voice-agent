@@ -86,7 +86,6 @@ CREATE TABLE IF NOT EXISTS reservation_changes (
 );
 
 -- 6) calls
-CREATE TYPE call_outcome AS ENUM ('NO_ACTION','BOOKED','MODIFIED','CANCELLED','FAILED','HANDOFF');
 CREATE TYPE confirmation_status AS ENUM ('NOT_NEEDED','PENDING','SENT','FAILED');
 
 CREATE TABLE IF NOT EXISTS calls (
@@ -95,8 +94,8 @@ CREATE TABLE IF NOT EXISTS calls (
   to_number TEXT NOT NULL,
   started_at TIMESTAMPTZ NOT NULL,
   ended_at TIMESTAMPTZ,
-  final_outcome call_outcome NOT NULL,
-  final_outcome_reason TEXT,
+  session_id TEXT,
+  reservation_change UUID REFERENCES reservation_changes(change_id),
   confirmation_status confirmation_status NOT NULL DEFAULT 'NOT_NEEDED',
   model TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -139,7 +138,6 @@ CREATE INDEX IF NOT EXISTS session_events_payload_gin ON session_events USING GI
 -- 9) realtime_items (normalized item state)
 CREATE TABLE IF NOT EXISTS realtime_items (
   item_id TEXT PRIMARY KEY,
-  previous_item_id TEXT,
   call_id TEXT NOT NULL REFERENCES calls(call_id),
   session_id TEXT,
   role TEXT,
@@ -148,8 +146,6 @@ CREATE TABLE IF NOT EXISTS realtime_items (
   content_json JSONB,
   tool_call_id TEXT,
   tool_name TEXT,
-  created_from_event_id UUID REFERENCES session_events(event_id),
-  last_event_id UUID REFERENCES session_events(event_id),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -169,13 +165,10 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   status tool_status NOT NULL DEFAULT 'PENDING',
   error_message TEXT,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ended_at TIMESTAMPTZ,
   latency_ms INT,
   reservation_id UUID REFERENCES reservations(reservation_id),
   change_id UUID REFERENCES reservation_changes(change_id),
   tool_call_external_id TEXT,
-  tool_item_id TEXT,
-  realtime_status TEXT,
   arguments_raw TEXT,
   output_raw TEXT,
   agent_name TEXT
@@ -197,7 +190,6 @@ CREATE TABLE IF NOT EXISTS mcp_calls (
   response_json JSONB,
   error_message TEXT,
   started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ended_at TIMESTAMPTZ,
   latency_ms INT
 );
 

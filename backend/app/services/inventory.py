@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, time
 from typing import Any
+from uuid import UUID
 
 import asyncpg
 
@@ -20,12 +21,14 @@ class InventoryStore:
         self,
         conn: asyncpg.Connection,
         req: SearchTeeTimesRequest,
+        course_id: str,
     ) -> list[TeeTimeOption]:
         """Searches for available tee-time slots matching caller constraints.
 
         Args:
             conn: Active database connection.
             req: Validated search criteria from the API layer.
+            course_id: Backend-selected course identifier to query.
 
         Returns:
             A list of user-facing tee-time options sorted by start time.
@@ -33,7 +36,7 @@ class InventoryStore:
         _LOGGER.debug(
             "InventoryStore.search() called.",
             extra={
-                "course_id": req.course_id,
+                "course_id": course_id,
                 "date": req.date,
                 "start_local": req.time_window.start_local,
                 "end_local": req.time_window.end_local,
@@ -44,7 +47,10 @@ class InventoryStore:
                 "call_id": req.call_id,
             },
         )
+        # asyncpg expects native Python date/time values for DATE/TIME bind params.
         search_date = date.fromisoformat(req.date)
+        start_local_time = time.fromisoformat(req.time_window.start_local)
+        end_local_time = time.fromisoformat(req.time_window.end_local)
         # Filter to a single course/date window and enforce live capacity limits.
         sql = """
             SELECT
@@ -68,10 +74,10 @@ class InventoryStore:
         """
         rows = await conn.fetch(
             sql,
-            req.course_id,
+            course_id,
             search_date,
-            req.time_window.start_local,
-            req.time_window.end_local,
+            start_local_time,
+            end_local_time,
             req.players,
             req.max_results,
         )
@@ -79,7 +85,7 @@ class InventoryStore:
             "InventoryStore.search() DB read complete.",
             extra={
                 "row_count": len(rows),
-                "course_id": req.course_id,
+                "course_id": course_id,
                 "date": search_date.isoformat(),
             },
         )
@@ -128,7 +134,7 @@ class InventoryStore:
             "InventoryStore.search() returning options.",
             extra={
                 "option_count": len(options),
-                "course_id": req.course_id,
+                "course_id": course_id,
                 "date": search_date.isoformat(),
             },
         )
@@ -137,7 +143,7 @@ class InventoryStore:
     async def get_slot_for_update(
         self,
         conn: asyncpg.Connection,
-        slot_id: str,
+        slot_id: str | UUID,
     ) -> dict[str, Any] | None:
         """Fetches and row-locks a slot for atomic inventory mutation.
 
@@ -168,7 +174,7 @@ class InventoryStore:
         return slot
 
     async def increment_players_booked(
-        self, conn: asyncpg.Connection, slot_id: str, players: int
+        self, conn: asyncpg.Connection, slot_id: str | UUID, players: int
     ) -> dict[str, Any] | None:
         """Adds players to a slot when capacity constraints permit.
 
@@ -208,7 +214,7 @@ class InventoryStore:
         return slot
 
     async def decrement_players_booked(
-        self, conn: asyncpg.Connection, slot_id: str, players: int
+        self, conn: asyncpg.Connection, slot_id: str | UUID, players: int
     ) -> dict[str, Any] | None:
         """Decrements booked players on a slot, never dropping below zero.
 

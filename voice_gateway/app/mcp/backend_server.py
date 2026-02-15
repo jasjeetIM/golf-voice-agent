@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -19,7 +20,6 @@ from shared import schemas
 
 ToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 _LOGGER = logging.getLogger(__name__)
-
 
 class BackendMCPServer(MCPServer):
     """Exposes backend business operations as MCP tools for the realtime agent."""
@@ -161,6 +161,15 @@ class BackendMCPServer(MCPServer):
         args = self._inject_call_id(arguments or {})
         result: dict[str, Any]
         error_message: str | None = None
+        tool_call_id: str | None = None
+        tool_call_external_id: str | None = None
+        started = time.monotonic()
+
+        if self._logger:
+            tool_call_id, tool_call_external_id = await self._logger.resolve_tool_call_reference(
+                tool_name=tool_name,
+                args_json=args,
+            )
 
         try:
             result = await self._dispatch_tool(tool_name, args)
@@ -176,14 +185,18 @@ class BackendMCPServer(MCPServer):
                 extra={"tool_name": tool_name, "error_message": error_message},
             )
 
+        latency_ms = int((time.monotonic() - started) * 1000)
+
         if self._logger:
             await self._logger.log_mcp_call(
-                tool_call_id=None,
+                tool_call_id=tool_call_id,
+                tool_call_external_id=tool_call_external_id,
                 server_name=self.name,
                 method="call_tool",
                 request_json={"tool_name": tool_name, "arguments": args},
                 response_json=result,
                 error_message=error_message,
+                latency_ms=latency_ms,
             )
 
         return CallToolResult(
@@ -217,13 +230,13 @@ class BackendMCPServer(MCPServer):
         )
 
     def _inject_call_id(self, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Backfills `call_id` in tool arguments when caller omitted it.
+        """Backfills call context into MCP tool invocations when absent.
 
         Args:
             arguments: Raw arguments from the tool invocation.
 
         Returns:
-            Arguments with call_id injected when available.
+            Arguments with call-scoped values injected.
         """
         args = dict(arguments)
         if self._call_id and not args.get("call_id"):

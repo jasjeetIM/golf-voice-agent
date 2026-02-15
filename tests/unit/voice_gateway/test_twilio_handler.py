@@ -114,9 +114,17 @@ class _FakeDbLogger:
         self.session_event_calls: list[dict[str, object]] = []
         self.tool_call_calls: list[dict[str, object]] = []
         self.item_upsert_calls: list[dict[str, object]] = []
+        self.backfilled_session_ids: list[str] = []
+        self.finalized_models: list[str | None] = []
 
     def set_session_id(self, session_id: str | None) -> None:
         self.session_id = session_id
+
+    async def backfill_session_id(self, session_id: str) -> None:
+        self.backfilled_session_ids.append(session_id)
+
+    async def finalize_call(self, *, model: str | None = None) -> None:
+        self.finalized_models.append(model)
 
     async def ensure_call(self, from_number: str, to_number: str) -> None:
         self.ensure_call_calls.append((from_number, to_number))
@@ -360,10 +368,31 @@ def test_capture_session_id_updates_handler_and_logger() -> None:
         data=SimpleNamespace(type="session.created", session={"id": "sess-1"}),
     )
 
-    handler._capture_session_id_from_event(event)
+    run(handler._capture_session_id_from_event(event))
 
     assert handler._session_id == "sess-1"
     assert logger.session_id == "sess-1"
+    assert logger.backfilled_session_ids == ["sess-1"]
+
+
+def test_capture_session_id_from_raw_server_event_updates_logger() -> None:
+    websocket = _FakeWebSocket()
+    handler = TwilioHandler(websocket)  # type: ignore[arg-type]
+    logger = _FakeDbLogger("CA-1")
+    handler._logger = logger  # type: ignore[assignment]
+
+    event = SimpleNamespace(
+        type="raw_model_event",
+        data=SimpleNamespace(
+            type="raw_server_event",
+            data={"type": "session.updated", "session": {"id": "sess-raw-1"}},
+        ),
+    )
+
+    run(handler._capture_session_id_from_event(event))
+
+    assert handler._session_id == "sess-raw-1"
+    assert logger.session_id == "sess-raw-1"
 
 
 def test_log_session_event_error_payload_is_written() -> None:

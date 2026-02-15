@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 from typing import Literal, Optional
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -24,7 +25,7 @@ class ReservationStatus(str, Enum):
 
 class PrimaryContact(BaseModel):
     name: str
-    phone_e164: str
+    phone_e164: str = ""
 
 
 class Reservation(BaseModel):
@@ -72,7 +73,7 @@ class TimeWindow(BaseModel):
 
     @model_validator(mode="after")
     def validate_window(self) -> "TimeWindow":
-        if self.start_local >= self.end_local:
+        if self.start_local > self.end_local:
             raise ValueError("start_local must be before end_local")
         return self
 
@@ -88,7 +89,6 @@ class TeeTimeOption(BaseModel):
 
 class SearchTeeTimesRequest(BaseModel):
     call_id: Optional[str] = None
-    course_id: str
     date: str
     time_window: TimeWindow
     players: int = Field(ge=1, le=4)
@@ -116,7 +116,7 @@ class SearchTeeTimesResponse(BaseModel):
 class BookTeeTimeRequest(BaseModel):
     idempotency_key: str
     call_id: Optional[str] = None
-    slot_id: str
+    slot_id: UUID
     primary_contact: PrimaryContact
     players: int = Field(ge=1, le=4)
     num_holes: Literal[9, 18]
@@ -189,7 +189,7 @@ class GetReservationDetailsResponse(BaseModel):
 class QuoteReservationChangeRequest(BaseModel):
     call_id: Optional[str] = None
     confirmation_code: str
-    new_slot_id: Optional[str] = None
+    new_slot_id: Optional[UUID] = None
     new_players: Optional[int] = Field(default=None, ge=1, le=4)
     new_reservation_type: Optional[ReservationType] = None
 
@@ -203,7 +203,7 @@ class QuoteReservationChangeResponse(BaseModel):
 
 class CheckSlotCapacityRequest(BaseModel):
     call_id: Optional[str] = None
-    slot_id: str
+    slot_id: UUID
     players: int = Field(ge=1, le=4)
 
 

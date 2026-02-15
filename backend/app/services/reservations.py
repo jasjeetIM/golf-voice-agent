@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import logging
 from typing import Any, Literal
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import json
@@ -36,6 +37,29 @@ class ReservationStore:
         )
         if not conn.is_in_transaction():
             raise RuntimeError(f"{operation} must run inside a database transaction")
+
+    @staticmethod
+    def _normalize_start_ts(value: Any) -> datetime:
+        """Normalizes start timestamp values to timezone-aware UTC datetimes.
+
+        Args:
+            value: Candidate timestamp value.
+
+        Returns:
+            Timezone-aware ``datetime`` suitable for asyncpg ``TIMESTAMPTZ`` binds.
+
+        Raises:
+            RuntimeError: If the value is not a parseable datetime representation.
+        """
+        if isinstance(value, datetime):
+            return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        if isinstance(value, str):
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise RuntimeError("Invalid start timestamp format") from exc
+            return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+        raise RuntimeError("Invalid start timestamp type")
 
     async def find_by_confirmation(
         self, conn: asyncpg.Connection, confirmation_code: str
@@ -92,7 +116,7 @@ class ReservationStore:
         *,
         idempotency_key: str,
         call_id: str | None = None,
-        slot_id: str,
+        slot_id: str | UUID,
         num_holes: Literal[9, 18],
         reservation_type: Literal["WALKING", "RIDING"],
         players: int,
@@ -164,7 +188,7 @@ class ReservationStore:
             return reservation
 
         # Generate a caller-friendly confirmation code and persist reservation.
-        confirmation_code = make_confirmation_code("RES")
+        confirmation_code = make_confirmation_code()
         _LOGGER.debug(
             "ReservationStore.create() generated confirmation code.",
             extra={"confirmation_code": confirmation_code},
@@ -359,13 +383,17 @@ class ReservationStore:
             if tz:
                 local_dt = datetime.fromisoformat(f"{existing.date}T{changes['start_local']}:00")
                 local_dt = local_dt.replace(tzinfo=ZoneInfo(tz))
-                changes["start_ts"] = local_dt.astimezone(timezone.utc).isoformat()
+                changes["start_ts"] = local_dt.astimezone(timezone.utc)
                 _LOGGER.debug(
                     "ReservationStore.modify() converted start_local to UTC timestamp.",
                     extra={
                         "confirmation_code": confirmation_code,
                         "start_local": changes.get("start_local"),
-                        "start_ts": changes.get("start_ts"),
+                        "start_ts": (
+                            changes["start_ts"].isoformat()
+                            if isinstance(changes.get("start_ts"), datetime)
+                            else changes.get("start_ts")
+                        ),
                     },
                 )
 
@@ -386,6 +414,7 @@ class ReservationStore:
 
         # Time change flow: lock target slot, validate capacity, move player load.
         if changes.get("start_ts"):
+            changes["start_ts"] = self._normalize_start_ts(changes["start_ts"])
             target = await conn.fetchrow(
                 """
                 SELECT * FROM tee_time_slots
@@ -722,7 +751,7 @@ class ReservationStore:
 
         reservation = Reservation(
             reservation_id=str(row["reservation_id"]),
-            confirmation_code=row.get("confirmation_code") or make_confirmation_code("RES"),
+            confirmation_code=row.get("confirmation_code") or make_confirmation_code(),
             status="CONFIRMED" if row["status"] == "BOOKED" else "CANCELLED",
             course_id=row["course_id"],
             slot_id=str(row["slot_id"]),

@@ -100,6 +100,8 @@ class TwilioHandler:
         # Call/session context used for logging and downstream tool calls.
         self._call_id: str | None = None
         self._session_id: str | None = None
+        self._agent_name: str | None = None
+        self._model_name: str | None = None
         self._logger: DbLogger | None = None
         self._backend_client: BackendClient | None = None
         self._mcp_server: BackendMCPServer | None = None
@@ -161,6 +163,7 @@ class TwilioHandler:
         self._backend_client = BackendClient(settings.backend_url, settings.BACKEND_API_KEY)
         self._mcp_server = BackendMCPServer(self._backend_client, logger=self._logger)
         agent = create_agent(self._mcp_server)
+        self._agent_name = getattr(agent, "name", None)
 
         # Fail fast before opening transports if required credentials are absent.
         if not settings.OPENAI_API_KEY:
@@ -259,6 +262,9 @@ class TwilioHandler:
         # Ensure all loop tasks exit before releasing network resources.
         await self._cancel_background_tasks()
         self._log_call_summary()
+        if self._logger:
+            with contextlib.suppress(Exception):
+                await self._logger.finalize_call(model=self._model_name or settings.OPENAI_REALTIME_MODEL)
 
         # Release backend HTTP connection pool resources.
         if self._backend_client:
@@ -355,7 +361,8 @@ class TwilioHandler:
         """
         _LOGGER.debug("Handling realtime event type=%s", event.type)
         # Capture session id early so all subsequent logs include it.
-        self._capture_session_id_from_event(event)
+        if await self._capture_session_id_from_event(event):
+            _LOGGER.debug("Backfilled session_id after realtime session capture.")
         self._update_realtime_diagnostics(event)
 
         # Persist normalized event details when logger is available.
@@ -481,8 +488,16 @@ class TwilioHandler:
 
         # Ensure the parent call row exists before appending child event rows.
         await self._logger.ensure_call(
-            from_number=start_data.get("customParameters", {}).get("from", ""),
-            to_number=start_data.get("customParameters", {}).get("to", ""),
+            from_number=(
+                start_data.get("customParameters", {}).get("from")
+                or start_data.get("from")
+                or ""
+            ),
+            to_number=(
+                start_data.get("customParameters", {}).get("to")
+                or start_data.get("to")
+                or ""
+            ),
         )
         _LOGGER.debug("Ensured call row exists in observability DB.", extra={"call_id": call_sid})
         await self._logger.log_call_event(
@@ -708,7 +723,7 @@ class TwilioHandler:
         payload: dict[str, Any] = {"type": event.type}
         item_id: str | None = None
         tool_call_id: str | None = None
-        agent_name: str | None = None
+        agent_name: str | None = self._agent_name
         direction = "SYSTEM"
 
         if event.type == "raw_model_event":
@@ -824,7 +839,7 @@ class TwilioHandler:
             direction=direction,
             item_id=item_id,
             tool_call_id=tool_call_id,
-            agent_name=agent_name,
+            agent_name=agent_name or self._agent_name,
         )
         _LOGGER.debug("Persisted session event to DB event_type=%s direction=%s", event.type, direction)
 
@@ -888,6 +903,9 @@ class TwilioHandler:
             "error",
         }:
             summary = self._summarize_raw_server_payload(raw_data)
+            model_name = summary.get("model")
+            if isinstance(model_name, str) and model_name:
+                self._model_name = model_name
             _LOGGER.debug("OpenAI raw event %s summary=%s", server_type, summary)
         elif server_type == "response.output_audio.delta":
             count = self._openai_raw_server_event_counts[server_type]
@@ -1000,27 +1018,45 @@ class TwilioHandler:
             return str(fallback) if fallback else None
         return None
 
-    def _capture_session_id_from_event(self, event: RealtimeSessionEvent) -> None:
+    async def _capture_session_id_from_event(self, event: RealtimeSessionEvent) -> bool:
         """Caches realtime session id when session-created/updated events arrive.
 
         Args:
             event: Realtime session event potentially containing session metadata.
         """
         if event.type != "raw_model_event":
-            return
+            return False
         raw = event.data
-        if raw.type not in {"session.created", "session.updated"}:
-            return
+        raw_type = getattr(raw, "type", None)
+        if raw_type in {"session.created", "session.updated"}:
+            session_id = self._extract_session_id(raw)
+        elif raw_type == "raw_server_event":
+            raw_data = getattr(raw, "data", None)
+            if not isinstance(raw_data, dict):
+                return False
+            if raw_data.get("type") not in {"session.created", "session.updated"}:
+                return False
+            session_obj = raw_data.get("session", {})
+            if isinstance(session_obj, dict):
+                value = session_obj.get("id")
+                session_id = str(value) if value else None
+            else:
+                session_id = None
+        else:
+            return False
 
-        session_id = self._extract_session_id(raw)
         if not session_id:
-            return
+            return False
 
+        changed = session_id != self._session_id
         self._session_id = session_id
         _LOGGER.debug("Captured realtime session id from model event.", extra={"session_id": session_id})
         if self._logger:
             self._logger.set_session_id(session_id)
+            if changed:
+                await self._logger.backfill_session_id(session_id)
             _LOGGER.debug(
                 "Updated DbLogger session context after session-id capture.",
                 extra={"call_id": self._call_id, "session_id": session_id},
             )
+        return changed

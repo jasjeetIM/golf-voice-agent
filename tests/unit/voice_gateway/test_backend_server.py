@@ -46,6 +46,14 @@ class _FakeLogger:
     def __init__(self) -> None:
         self.call_id = "CA1"
         self.calls: list[dict[str, object]] = []
+        self.resolved_tool_call_id: str | None = None
+        self.resolved_tool_call_external_id: str | None = None
+
+    async def resolve_tool_call_reference(
+        self, *, tool_name: str, args_json: dict[str, object]
+    ) -> tuple[str | None, str | None]:
+        del tool_name, args_json
+        return self.resolved_tool_call_id, self.resolved_tool_call_external_id
 
     async def log_mcp_call(self, **kwargs: object) -> None:
         self.calls.append(dict(kwargs))
@@ -63,11 +71,11 @@ def test_call_tool_injects_call_id_when_missing() -> None:
     run(
         server.call_tool(
             "search_tee_times",
-            {"course_id": "course-1", "players": 2},
+            {"players": 2},
         )
     )
 
-    assert client.search_payloads == [{"course_id": "course-1", "players": 2, "call_id": "CA123"}]
+    assert client.search_payloads == [{"players": 2, "call_id": "CA123"}]
 
 
 def test_call_tool_preserves_existing_call_id() -> None:
@@ -78,11 +86,11 @@ def test_call_tool_preserves_existing_call_id() -> None:
     run(
         server.call_tool(
             "search_tee_times",
-            {"course_id": "course-1", "players": 2, "call_id": "CA999"},
+            {"players": 2, "call_id": "CA999"},
         )
     )
 
-    assert client.search_payloads == [{"course_id": "course-1", "players": 2, "call_id": "CA999"}]
+    assert client.search_payloads == [{"players": 2, "call_id": "CA999"}]
 
 
 def test_get_prompt_raises_mcp_error_for_unknown_prompt() -> None:
@@ -125,16 +133,32 @@ def test_call_tool_unknown_name_returns_error_payload() -> None:
 def test_call_tool_logs_mcp_call_when_logger_is_attached() -> None:
     client = _FakeBackendClient()
     logger = _FakeLogger()
+    logger.resolved_tool_call_id = "11111111-1111-1111-1111-111111111111"
+    logger.resolved_tool_call_external_id = "call_ext_123"
     server = BackendMCPServer(client, logger=logger)  # type: ignore[arg-type]
     server.set_call_id("CA777")
 
-    run(server.call_tool("search_tee_times", {"course_id": "course-1"}))
+    run(server.call_tool("search_tee_times", {}))
 
     assert len(logger.calls) == 1
     assert logger.calls[0]["server_name"] == "backend_tools"
+    assert logger.calls[0]["tool_call_id"] == "11111111-1111-1111-1111-111111111111"
+    assert logger.calls[0]["tool_call_external_id"] == "call_ext_123"
+    assert isinstance(logger.calls[0]["latency_ms"], int)
     request_json = logger.calls[0]["request_json"]
     assert isinstance(request_json, dict)
     assert request_json["arguments"]["call_id"] == "CA777"
+
+
+def test_list_tools_search_schema_has_no_course_id() -> None:
+    client = _FakeBackendClient()
+    server = BackendMCPServer(client)  # type: ignore[arg-type]
+
+    tools = run(server.list_tools())
+    search_tool = next(tool for tool in tools if tool.name == "search_tee_times")
+    properties = search_tool.inputSchema.get("properties", {})
+
+    assert "course_id" not in properties
 
 
 def test_cleanup_closes_backend_client() -> None:

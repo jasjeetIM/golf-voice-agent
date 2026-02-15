@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -13,7 +13,6 @@ from ._fakes import FakeConnection, run
 
 def build_search_request() -> SearchTeeTimesRequest:
     return SearchTeeTimesRequest(
-        course_id="course-1",
         date="2026-03-01",
         time_window=TimeWindow(start_local="08:00", end_local="11:00"),
         players=2,
@@ -26,7 +25,6 @@ def build_search_request() -> SearchTeeTimesRequest:
 def test_search_request_rejects_invalid_date_format() -> None:
     with pytest.raises(ValidationError):
         SearchTeeTimesRequest(
-            course_id="course-1",
             date="03-01-2026",
             time_window=TimeWindow(start_local="08:00", end_local="11:00"),
             players=2,
@@ -53,7 +51,7 @@ def test_search_returns_transformed_tee_time_options() -> None:
         ]
     )
 
-    result = run(store.search(conn, build_search_request()))
+    result = run(store.search(conn, build_search_request(), course_id="course-1"))
 
     assert len(result) == 1
     assert result[0].slot_id == "slot-1"
@@ -63,6 +61,8 @@ def test_search_returns_transformed_tee_time_options() -> None:
     assert result[0].players_allowed == [1, 2, 3]
     assert "FROM tee_time_slots" in conn.calls["fetch"][0][0]
     assert conn.calls["fetch"][0][1][1] == date(2026, 3, 1)
+    assert conn.calls["fetch"][0][1][2] == time(8, 0)
+    assert conn.calls["fetch"][0][1][3] == time(11, 0)
 
 
 def test_get_slot_for_update_returns_dict_when_found() -> None:

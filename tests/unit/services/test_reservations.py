@@ -259,6 +259,50 @@ def test_modify_updates_time_players_and_round_type() -> None:
     assert result.reservation_type.value == "RIDING"
     assert len(conn.calls["execute"]) == 7
     assert "INSERT INTO reservation_changes" in conn.calls["execute"][-1][0]
+    target_slot_lookup_args = next(
+        args
+        for sql, args in conn.calls["fetchrow"]
+        if "WHERE course_id = $1 AND start_ts = $2 FOR UPDATE" in sql
+    )
+    assert isinstance(target_slot_lookup_args[1], datetime)
+    assert target_slot_lookup_args[1].tzinfo is not None
+
+
+def test_modify_normalizes_start_ts_string_before_db_lookup() -> None:
+    store = ReservationStore()
+    current_slot_id = str(uuid4())
+    target_slot_id = str(uuid4())
+
+    conn = FakeConnection(
+        fetchrow_results=[
+            reservation_row(slot_id=current_slot_id, players=2, reservation_type="WALKING"),
+            {"slot_id": current_slot_id, "course_id": "course-1"},
+            {
+                "slot_id": target_slot_id,
+                "is_closed": False,
+                "players_booked": 1,
+                "capacity_players": 4,
+            },
+            reservation_row(slot_id=target_slot_id, players=2, reservation_type="WALKING"),
+        ]
+    )
+
+    result = run(
+        store.modify(
+            conn,
+            confirmation_code="RES-ABCDE1",
+            changes={"start_ts": "2026-03-01T15:30:00+00:00"},
+        )
+    )
+
+    assert result is not None
+    target_slot_lookup_args = next(
+        args
+        for sql, args in conn.calls["fetchrow"]
+        if "WHERE course_id = $1 AND start_ts = $2 FOR UPDATE" in sql
+    )
+    assert isinstance(target_slot_lookup_args[1], datetime)
+    assert target_slot_lookup_args[1].isoformat() == "2026-03-01T15:30:00+00:00"
 
 
 def test_modify_propagates_call_id_to_reservation_updates_and_change_log() -> None:
