@@ -23,7 +23,6 @@ _LOGGER = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/tools")
 inventory_store = InventoryStore()
 reservation_store = ReservationStore()
-SEARCH_FRESHNESS_TTL_SECONDS = 300
 
 
 def require_auth(authorization: str | None = Header(default=None)) -> None:
@@ -65,7 +64,7 @@ def build_freshness_payload() -> dict[str, Any]:
     """
     return {
         "generated_at": datetime.utcnow().isoformat(),
-        "ttl_seconds": SEARCH_FRESHNESS_TTL_SECONDS,
+        "ttl_seconds": settings.SEARCH_FRESHNESS_TTL_SECONDS,
     }
 
 
@@ -225,6 +224,7 @@ async def book_tee_time(request: schemas.BookTeeTimeRequest, _auth: None = Depen
             request.primary_contact.name,
         )
         customer_id = customer_row["customer_id"]
+        _LOGGER.debug("Added customer to db.", extra={"customer_id":customer_id})
 
         # Persist reservation and reservation-change history in the same transaction.
         reservation = await reservation_store.create(

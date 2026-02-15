@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+
+import pytest
+from pydantic import ValidationError
 
 from backend.app.services.inventory import InventoryStore
 from shared.schemas import ReservationType, SearchTeeTimesRequest, TimeWindow
@@ -18,6 +21,19 @@ def build_search_request() -> SearchTeeTimesRequest:
         reservation_type=ReservationType.WALKING,
         max_results=5,
     )
+
+
+def test_search_request_rejects_invalid_date_format() -> None:
+    with pytest.raises(ValidationError):
+        SearchTeeTimesRequest(
+            course_id="course-1",
+            date="03-01-2026",
+            time_window=TimeWindow(start_local="08:00", end_local="11:00"),
+            players=2,
+            holes=18,
+            reservation_type=ReservationType.WALKING,
+            max_results=5,
+        )
 
 
 def test_search_returns_transformed_tee_time_options() -> None:
@@ -46,6 +62,7 @@ def test_search_returns_transformed_tee_time_options() -> None:
     assert result[0].price.amount_total == 240.0
     assert result[0].players_allowed == [1, 2, 3]
     assert "FROM tee_time_slots" in conn.calls["fetch"][0][0]
+    assert conn.calls["fetch"][0][1][1] == date(2026, 3, 1)
 
 
 def test_get_slot_for_update_returns_dict_when_found() -> None:

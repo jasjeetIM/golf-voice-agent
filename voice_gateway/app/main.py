@@ -16,6 +16,7 @@ import logging
 from collections.abc import Iterable
 from contextlib import asynccontextmanager
 
+import agents
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import PlainTextResponse
 
@@ -25,6 +26,33 @@ from .twilio.twiml import build_connect_stream_twiml
 from .ws.twilio_handler import TwilioHandler
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _configure_openai_sdk_logging() -> None:
+    """Configures OpenAI SDK and Agents logger verbosity.
+
+    A single ``OPENAI_LOG`` setting drives logger levels for OpenAI, Agents, and
+    HTTP transport logs to keep verbosity consistent across the realtime stack.
+    """
+    requested_level = settings.OPENAI_LOG.strip().upper() if settings.OPENAI_LOG else "INFO"
+    openai_level = getattr(logging, requested_level, logging.INFO)
+
+    logging.getLogger("openai").setLevel(openai_level)
+    logging.getLogger("openai.agents").setLevel(openai_level)
+    logging.getLogger("openai.agents.tracing").setLevel(openai_level)
+    logging.getLogger("httpx").setLevel(openai_level)
+
+    # This helper adds a stdout stream handler for the Agents logger.
+    if openai_level <= logging.DEBUG:
+        agents.enable_verbose_stdout_logging()
+
+    _LOGGER.debug(
+        "Configured OpenAI SDK logging.",
+        extra={
+            "openai_log": settings.OPENAI_LOG,
+            "resolved_openai_level": logging.getLevelName(openai_level),
+        },
+    )
 
 
 def _configure_logging() -> None:
@@ -54,12 +82,14 @@ def _configure_logging() -> None:
     logging.getLogger("voice_gateway.app.observability").setLevel(observability_level)
     logging.getLogger("websockets").setLevel(websockets_level)
     logging.getLogger("websockets.client").setLevel(websockets_level)
+    _configure_openai_sdk_logging()
     _LOGGER.debug(
         "Logging configured for voice gateway.",
         extra={
             "log_level": settings.LOG_LEVEL,
             "observability_log_level": settings.OBSERVABILITY_LOG_LEVEL,
             "websockets_log_level": settings.WEBSOCKETS_LOG_LEVEL,
+            "openai_log": settings.OPENAI_LOG,
             "validate_twilio_signatures": settings.VALIDATE_TWILIO_SIGNATURES,
         },
     )

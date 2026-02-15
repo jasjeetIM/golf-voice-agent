@@ -24,10 +24,17 @@ class Settings(BaseSettings):
         LOG_LEVEL: Application log verbosity.
         OBSERVABILITY_LOG_LEVEL: Log level for observability internals.
         WEBSOCKETS_LOG_LEVEL: Log level for `websockets` library internals.
-        VERBOSE_TWILIO_STREAM_LOGGING: Enables per-frame media debug logs.
         TWILIO_STREAM_LOG_SAMPLE_EVERY_N: Frame sampling cadence when verbose
             stream logging is disabled.
+        TWILIO_STARTUP_BUFFER_CHUNKS: Number of initial audio chunks to buffer
+            before forwarding caller audio to the realtime session.
         OPENAI_REALTIME_MODEL: Realtime model identifier.
+        OPENAI_REALTIME_VOICE: Voice used for synthesized model audio.
+        OPENAI_TURN_DETECTION_TYPE: Realtime VAD mode (`server_vad` or
+            `semantic_vad`) used for caller turn detection.
+        OPENAI_LOG: Log level for OpenAI SDK/Agents/httpx logs.
+        VERBOSE_OPENAI_RAW_EVENTS: Enables full raw OpenAI server payload
+            logging (high volume).
         DB_CONNECTION_STRING: Optional observability database connection string.
         VALIDATE_TWILIO_SIGNATURES: Whether to enforce Twilio signature checks.
         TWILIO_AUTH_TOKEN: Auth token used to validate Twilio signatures.
@@ -50,9 +57,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "info"
     OBSERVABILITY_LOG_LEVEL: str = "info"
     WEBSOCKETS_LOG_LEVEL: str = "info"
-    VERBOSE_TWILIO_STREAM_LOGGING: bool = False
     TWILIO_STREAM_LOG_SAMPLE_EVERY_N: int = Field(default=100, ge=1)
+    TWILIO_STARTUP_BUFFER_CHUNKS: int = Field(default=3, ge=0)
     OPENAI_REALTIME_MODEL: str = "gpt-4o-realtime-preview-2024-12-17"
+    OPENAI_REALTIME_VOICE: str = "alloy"
+    OPENAI_TURN_DETECTION_TYPE: str = "server_vad"
+    OPENAI_LOG: str = "info"
+    VERBOSE_OPENAI_RAW_EVENTS: bool = False
     DB_CONNECTION_STRING: str | None = None
 
     # Twilio webhook validation. Keep enabled in production.

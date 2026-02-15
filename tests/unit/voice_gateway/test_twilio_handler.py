@@ -252,12 +252,37 @@ def test_handle_media_event_flushes_buffer_to_realtime_session() -> None:
     session = _FakeSession()
     handler.session = session  # type: ignore[assignment]
     handler.BUFFER_SIZE_BYTES = 3
+    handler.STARTUP_BUFFER_CHUNKS = 0
+    handler._startup_warmed = True
 
     payload = base64.b64encode(b"abcd").decode("utf-8")
     run(handler._handle_media_event({"media": {"payload": payload}}))
 
     assert session.sent_audio == [b"abcd"]
     assert handler._audio_buffer == bytearray()
+
+
+def test_handle_media_event_respects_startup_warmup_buffering() -> None:
+    websocket = _FakeWebSocket()
+    handler = TwilioHandler(websocket)  # type: ignore[arg-type]
+    session = _FakeSession()
+    handler.session = session  # type: ignore[assignment]
+    handler.BUFFER_SIZE_BYTES = 3
+    handler.STARTUP_BUFFER_CHUNKS = 2
+    handler._startup_warmed = False
+    handler._startup_buffer = bytearray()
+
+    first_payload = base64.b64encode(b"abcd").decode("utf-8")
+    second_payload = base64.b64encode(b"efgh").decode("utf-8")
+
+    run(handler._handle_media_event({"media": {"payload": first_payload}}))
+    assert session.sent_audio == []
+    assert bytes(handler._startup_buffer) == b"abcd"
+
+    run(handler._handle_media_event({"media": {"payload": second_payload}}))
+    assert session.sent_audio == [b"abcdefgh"]
+    assert handler._startup_warmed is True
+    assert handler._startup_buffer == bytearray()
 
 
 def test_handle_realtime_audio_without_stream_sid_is_dropped() -> None:

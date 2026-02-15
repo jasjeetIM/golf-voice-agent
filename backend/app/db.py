@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
+from contextlib import asynccontextmanager
 import logging
 from typing import AsyncIterator
 
@@ -55,7 +55,7 @@ async def close_pool() -> None:
     _LOGGER.debug("Backend DB pool closed.")
 
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def get_conn() -> AsyncIterator[asyncpg.Connection]:
     """Yields a pooled connection for read or non-transactional operations."""
     pool = await get_pool()
@@ -63,7 +63,7 @@ async def get_conn() -> AsyncIterator[asyncpg.Connection]:
         yield conn
 
 
-@contextlib.asynccontextmanager
+@asynccontextmanager
 async def transaction() -> AsyncIterator[asyncpg.Connection]:
     """Yields a pooled connection wrapped in a database transaction."""
     pool = await get_pool()

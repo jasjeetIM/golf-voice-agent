@@ -96,6 +96,14 @@ class SearchTeeTimesRequest(BaseModel):
     reservation_type: ReservationType
     max_results: int = Field(ge=1, le=10, default=5)
 
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: str) -> str:
+        """Validates tee-time search dates are in YYYY-MM-DD format."""
+        if len(value) != 10 or value[4] != "-" or value[7] != "-":
+            raise ValueError("Invalid date format")
+        return value
+
 
 class SearchTeeTimesResponse(BaseModel):
     course_id: str

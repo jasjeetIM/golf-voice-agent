@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
@@ -11,6 +12,8 @@ import asyncpg
 
 from shared.schemas import Reservation
 from .confirmation_code import make_confirmation_code
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class ReservationStore:
@@ -27,6 +30,10 @@ class ReservationStore:
         Raises:
             RuntimeError: If no transaction is active on the connection.
         """
+        _LOGGER.debug(
+            "ReservationStore._require_active_transaction() called.",
+            extra={"operation": operation, "in_transaction": conn.is_in_transaction()},
+        )
         if not conn.is_in_transaction():
             raise RuntimeError(f"{operation} must run inside a database transaction")
 
@@ -42,6 +49,10 @@ class ReservationStore:
         Returns:
             Reservation model when found, otherwise ``None``.
         """
+        _LOGGER.debug(
+            "ReservationStore.find_by_confirmation() called.",
+            extra={"confirmation_code": confirmation_code},
+        )
         row = await conn.fetchrow(
             """
             SELECT r.*, t.course_id, t.start_ts,
@@ -56,9 +67,24 @@ class ReservationStore:
             """,
             confirmation_code,
         )
+        _LOGGER.debug(
+            "ReservationStore.find_by_confirmation() DB read complete.",
+            extra={"confirmation_code": confirmation_code, "found": row is not None},
+        )
         if not row:
             return None
-        return self._row_to_reservation(dict(row))
+        reservation = self._row_to_reservation(dict(row))
+        _LOGGER.debug(
+            "ReservationStore.find_by_confirmation() mapped reservation.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "reservation_id": reservation.reservation_id,
+                "status": reservation.status,
+                "slot_id": reservation.slot_id,
+                "players": reservation.players,
+            },
+        )
+        return reservation
 
     async def create(
         self,
@@ -91,6 +117,18 @@ class ReservationStore:
         Raises:
             RuntimeError: If called outside an active database transaction.
         """
+        _LOGGER.debug(
+            "ReservationStore.create() called.",
+            extra={
+                "idempotency_key": idempotency_key,
+                "call_id": call_id,
+                "slot_id": slot_id,
+                "num_holes": num_holes,
+                "reservation_type": reservation_type,
+                "players": players,
+                "customer_id": customer_id,
+            },
+        )
         self._require_active_transaction(conn, "create reservation")
 
         # Idempotent create: if this key was already applied, return that result.
@@ -109,11 +147,28 @@ class ReservationStore:
             """,
             idempotency_key,
         )
+        _LOGGER.debug(
+            "ReservationStore.create() idempotency check complete.",
+            extra={"idempotency_key": idempotency_key, "existing_change_found": existing is not None},
+        )
         if existing:
-            return self._row_to_reservation(dict(existing))
+            reservation = self._row_to_reservation(dict(existing))
+            _LOGGER.debug(
+                "ReservationStore.create() returning existing reservation for idempotency key.",
+                extra={
+                    "idempotency_key": idempotency_key,
+                    "reservation_id": reservation.reservation_id,
+                    "confirmation_code": reservation.confirmation_code,
+                },
+            )
+            return reservation
 
         # Generate a caller-friendly confirmation code and persist reservation.
         confirmation_code = make_confirmation_code("RES")
+        _LOGGER.debug(
+            "ReservationStore.create() generated confirmation code.",
+            extra={"confirmation_code": confirmation_code},
+        )
         res_row = await conn.fetchrow(
             """
             INSERT INTO reservations
@@ -140,6 +195,15 @@ class ReservationStore:
             call_id,
         )
         reservation_id = res_row["reservation_id"]
+        _LOGGER.debug(
+            "ReservationStore.create() inserted reservation row.",
+            extra={
+                "reservation_id": str(reservation_id),
+                "confirmation_code": confirmation_code,
+                "created_at": res_row["created_at"].isoformat() if res_row["created_at"] else None,
+                "updated_at": res_row["updated_at"].isoformat() if res_row["updated_at"] else None,
+            },
+        )
 
         # Record create audit event keyed by idempotency token.
         await conn.execute(
@@ -152,6 +216,15 @@ class ReservationStore:
             call_id,
             idempotency_key,
             json.dumps({"confirmation_code": confirmation_code}),
+        )
+        _LOGGER.debug(
+            "ReservationStore.create() inserted reservation_changes CREATE row.",
+            extra={
+                "reservation_id": str(reservation_id),
+                "idempotency_key": idempotency_key,
+                "call_id": call_id,
+                "change_type": "CREATE",
+            },
         )
 
         # Re-read joined row so API returns a full normalized reservation payload.
@@ -169,7 +242,22 @@ class ReservationStore:
             """,
             reservation_id,
         )
-        return self._row_to_reservation(dict(row))
+        _LOGGER.debug(
+            "ReservationStore.create() fetched joined reservation row.",
+            extra={"reservation_id": str(reservation_id), "row_found": row is not None},
+        )
+        reservation = self._row_to_reservation(dict(row))
+        _LOGGER.debug(
+            "ReservationStore.create() returning reservation model.",
+            extra={
+                "reservation_id": reservation.reservation_id,
+                "confirmation_code": reservation.confirmation_code,
+                "status": reservation.status,
+                "slot_id": reservation.slot_id,
+                "players": reservation.players,
+            },
+        )
+        return reservation
 
     async def modify(
         self,
@@ -196,11 +284,33 @@ class ReservationStore:
             RuntimeError: If called outside a transaction or if target slot state
                 makes the requested change invalid.
         """
+        _LOGGER.debug(
+            "ReservationStore.modify() called.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "idempotency_key": idempotency_key,
+                "changes": changes,
+                "call_id": call_id,
+            },
+        )
         self._require_active_transaction(conn, "modify reservation")
 
         existing = await self.find_by_confirmation(conn, confirmation_code)
         if not existing:
+            _LOGGER.debug(
+                "ReservationStore.modify() target reservation not found.",
+                extra={"confirmation_code": confirmation_code},
+            )
             return None
+        _LOGGER.debug(
+            "ReservationStore.modify() loaded current reservation.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "reservation_id": existing.reservation_id,
+                "slot_id": existing.slot_id,
+                "players": existing.players,
+            },
+        )
 
         # Idempotent modify: if this key has already been applied to the same
         # reservation, return the current persisted reservation state.
@@ -216,8 +326,25 @@ class ReservationStore:
                 idempotency_key,
                 confirmation_code,
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() idempotency check complete.",
+                extra={
+                    "idempotency_key": idempotency_key,
+                    "confirmation_code": confirmation_code,
+                    "prior_change_found": bool(prior),
+                },
+            )
             if prior:
-                return await self.find_by_confirmation(conn, confirmation_code)
+                reservation = await self.find_by_confirmation(conn, confirmation_code)
+                _LOGGER.debug(
+                    "ReservationStore.modify() returning existing reservation for idempotency key.",
+                    extra={
+                        "idempotency_key": idempotency_key,
+                        "confirmation_code": confirmation_code,
+                        "reservation_id": reservation.reservation_id if reservation else None,
+                    },
+                )
+                return reservation
 
         # Convert local time change requests into UTC timestamps for slot matching.
         if changes.get("start_local") and not changes.get("start_ts"):
@@ -225,15 +352,31 @@ class ReservationStore:
                 "SELECT timezone FROM courses WHERE course_id = $1",
                 existing.course_id,
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() fetched course timezone for start_local conversion.",
+                extra={"course_id": existing.course_id, "timezone": tz},
+            )
             if tz:
                 local_dt = datetime.fromisoformat(f"{existing.date}T{changes['start_local']}:00")
                 local_dt = local_dt.replace(tzinfo=ZoneInfo(tz))
                 changes["start_ts"] = local_dt.astimezone(timezone.utc).isoformat()
+                _LOGGER.debug(
+                    "ReservationStore.modify() converted start_local to UTC timestamp.",
+                    extra={
+                        "confirmation_code": confirmation_code,
+                        "start_local": changes.get("start_local"),
+                        "start_ts": changes.get("start_ts"),
+                    },
+                )
 
         # Lock the current slot so later capacity updates remain consistent.
         current_slot = await conn.fetchrow(
             "SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE",
             existing.slot_id,
+        )
+        _LOGGER.debug(
+            "ReservationStore.modify() locked current slot row.",
+            extra={"slot_id": existing.slot_id, "found": current_slot is not None},
         )
         if not current_slot:
             raise RuntimeError("Current slot not found")
@@ -251,6 +394,14 @@ class ReservationStore:
                 current_slot["course_id"],
                 changes["start_ts"],
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() looked up target slot for time change.",
+                extra={
+                    "course_id": current_slot["course_id"],
+                    "target_start_ts": changes["start_ts"],
+                    "target_found": target is not None,
+                },
+            )
             if not target or target["is_closed"]:
                 raise RuntimeError("Requested time unavailable")
             if target["players_booked"] + current_players > target["capacity_players"]:
@@ -265,6 +416,13 @@ class ReservationStore:
                 current_players,
                 current_slot["slot_id"],
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() decremented players on previous slot.",
+                extra={
+                    "slot_id": str(current_slot["slot_id"]),
+                    "players_removed": current_players,
+                },
+            )
             await conn.execute(
                 """
                 UPDATE tee_time_slots
@@ -273,6 +431,13 @@ class ReservationStore:
                 """,
                 current_players,
                 target["slot_id"],
+            )
+            _LOGGER.debug(
+                "ReservationStore.modify() incremented players on target slot.",
+                extra={
+                    "slot_id": str(target["slot_id"]),
+                    "players_added": current_players,
+                },
             )
             await conn.execute(
                 """
@@ -287,6 +452,14 @@ class ReservationStore:
                 confirmation_code,
                 call_id,
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() updated reservation slot_id.",
+                extra={
+                    "confirmation_code": confirmation_code,
+                    "new_slot_id": str(target["slot_id"]),
+                    "call_id": call_id,
+                },
+            )
             active_slot_id = target["slot_id"]
 
         # Player-count change flow: apply delta against the active slot.
@@ -295,6 +468,10 @@ class ReservationStore:
             slot_row = await conn.fetchrow(
                 "SELECT * FROM tee_time_slots WHERE slot_id = $1 FOR UPDATE",
                 active_slot_id,
+            )
+            _LOGGER.debug(
+                "ReservationStore.modify() locked active slot for player delta.",
+                extra={"slot_id": str(active_slot_id), "found": slot_row is not None, "delta": delta},
             )
             if not slot_row:
                 raise RuntimeError("Slot not found")
@@ -314,6 +491,10 @@ class ReservationStore:
                 delta,
                 active_slot_id,
             )
+            _LOGGER.debug(
+                "ReservationStore.modify() updated tee_time_slots players_booked.",
+                extra={"slot_id": str(active_slot_id), "player_delta": delta},
+            )
             await conn.execute(
                 """
                 UPDATE reservations
@@ -326,6 +507,14 @@ class ReservationStore:
                 changes["players"],
                 confirmation_code,
                 call_id,
+            )
+            _LOGGER.debug(
+                "ReservationStore.modify() updated reservation num_players.",
+                extra={
+                    "confirmation_code": confirmation_code,
+                    "new_players": changes["players"],
+                    "call_id": call_id,
+                },
             )
             current_players = changes["players"]
 
@@ -344,6 +533,14 @@ class ReservationStore:
                 normalized,
                 confirmation_code,
                 call_id,
+            )
+            _LOGGER.debug(
+                "ReservationStore.modify() updated reservation_type.",
+                extra={
+                    "confirmation_code": confirmation_code,
+                    "reservation_type": normalized,
+                    "call_id": call_id,
+                },
             )
 
         # Persist one high-level change record for downstream audit/tracing.
@@ -368,8 +565,28 @@ class ReservationStore:
             json.dumps({"confirmation_code": confirmation_code}),
             confirmation_code,
         )
+        _LOGGER.debug(
+            "ReservationStore.modify() inserted reservation_changes row.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "change_type": change_type,
+                "idempotency_key": idempotency_key,
+                "call_id": call_id,
+            },
+        )
 
-        return await self.find_by_confirmation(conn, confirmation_code)
+        updated = await self.find_by_confirmation(conn, confirmation_code)
+        _LOGGER.debug(
+            "ReservationStore.modify() returning updated reservation.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "reservation_id": updated.reservation_id if updated else None,
+                "slot_id": updated.slot_id if updated else None,
+                "players": updated.players if updated else None,
+                "status": updated.status if updated else None,
+            },
+        )
+        return updated
 
     async def cancel(
         self,
@@ -392,13 +609,29 @@ class ReservationStore:
         Raises:
             RuntimeError: If called outside an active database transaction.
         """
+        _LOGGER.debug(
+            "ReservationStore.cancel() called.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "idempotency_key": idempotency_key,
+                "call_id": call_id,
+            },
+        )
         self._require_active_transaction(conn, "cancel reservation")
 
         existing = await self.find_by_confirmation(conn, confirmation_code)
         if not existing:
+            _LOGGER.debug(
+                "ReservationStore.cancel() target reservation not found.",
+                extra={"confirmation_code": confirmation_code},
+            )
             return None
 
         if existing.status == "CANCELLED":
+            _LOGGER.debug(
+                "ReservationStore.cancel() reservation already cancelled.",
+                extra={"confirmation_code": confirmation_code},
+            )
             return existing
 
         reservation_id = await conn.fetchval(
@@ -414,9 +647,25 @@ class ReservationStore:
             confirmation_code,
             call_id,
         )
+        _LOGGER.debug(
+            "ReservationStore.cancel() updated reservation status to CANCELLED.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "reservation_id": str(reservation_id) if reservation_id else None,
+                "call_id": call_id,
+            },
+        )
 
         if not reservation_id:
-            return await self.find_by_confirmation(conn, confirmation_code)
+            reservation = await self.find_by_confirmation(conn, confirmation_code)
+            _LOGGER.debug(
+                "ReservationStore.cancel() no row returned from update; fetched current state.",
+                extra={
+                    "confirmation_code": confirmation_code,
+                    "reservation_id": reservation.reservation_id if reservation else None,
+                },
+            )
+            return reservation
 
         await conn.execute(
             """
@@ -430,8 +679,25 @@ class ReservationStore:
             json.dumps({"status": "BOOKED"}),
             json.dumps({"status": "CANCELLED", "confirmation_code": confirmation_code}),
         )
+        _LOGGER.debug(
+            "ReservationStore.cancel() inserted reservation_changes CANCEL row.",
+            extra={
+                "reservation_id": str(reservation_id),
+                "idempotency_key": idempotency_key,
+                "call_id": call_id,
+            },
+        )
 
-        return await self.find_by_confirmation(conn, confirmation_code)
+        cancelled = await self.find_by_confirmation(conn, confirmation_code)
+        _LOGGER.debug(
+            "ReservationStore.cancel() returning cancelled reservation.",
+            extra={
+                "confirmation_code": confirmation_code,
+                "reservation_id": cancelled.reservation_id if cancelled else None,
+                "status": cancelled.status if cancelled else None,
+            },
+        )
+        return cancelled
 
     def _row_to_reservation(self, row: dict[str, Any]) -> Reservation:
         """Maps a joined database row to the public Reservation schema.
@@ -442,10 +708,19 @@ class ReservationStore:
         Returns:
             Normalized ``Reservation`` model for API responses.
         """
+        _LOGGER.debug(
+            "ReservationStore._row_to_reservation() called.",
+            extra={
+                "reservation_id": str(row.get("reservation_id")) if row.get("reservation_id") else None,
+                "confirmation_code": row.get("confirmation_code"),
+                "slot_id": str(row.get("slot_id")) if row.get("slot_id") else None,
+                "status": row.get("status"),
+            },
+        )
         contact_name = row.get("primary_contact_name") or ""
         contact_phone = row.get("primary_contact_phone_e164") or ""
 
-        return Reservation(
+        reservation = Reservation(
             reservation_id=str(row["reservation_id"]),
             confirmation_code=row.get("confirmation_code") or make_confirmation_code("RES"),
             status="CONFIRMED" if row["status"] == "BOOKED" else "CANCELLED",
@@ -463,3 +738,14 @@ class ReservationStore:
             if row.get("status") == "CANCELLED" and row.get("updated_at")
             else None,
         )
+        _LOGGER.debug(
+            "ReservationStore._row_to_reservation() produced Reservation model.",
+            extra={
+                "reservation_id": reservation.reservation_id,
+                "confirmation_code": reservation.confirmation_code,
+                "status": reservation.status,
+                "slot_id": reservation.slot_id,
+                "players": reservation.players,
+            },
+        )
+        return reservation

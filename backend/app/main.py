@@ -52,9 +52,3 @@ def create_app() -> FastAPI:
 
 _configure_logging()
 app = create_app()
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    """Returns a minimal liveness response for orchestration checks."""
-    return {"status": "ok", "service": "backend"}

@@ -89,6 +89,9 @@ class TwilioHandler:
         # Inbound caller audio buffer before forwarding to realtime model.
         self._audio_buffer = bytearray()
         self._last_buffer_send_time = time.time()
+        self.STARTUP_BUFFER_CHUNKS = settings.TWILIO_STARTUP_BUFFER_CHUNKS
+        self._startup_buffer = bytearray()
+        self._startup_warmed = self.STARTUP_BUFFER_CHUNKS == 0
 
         # Outbound playback bookkeeping for Twilio mark acknowledgements.
         self._mark_counter = 0
@@ -110,16 +113,25 @@ class TwilioHandler:
         self._media_frame_count = 0
         self._audio_flush_count = 0
         self._twilio_send_count = 0
+        self._twilio_in_audio_frames = 0
+        self._twilio_in_audio_bytes = 0
+        self._openai_in_audio_chunks = 0
+        self._openai_in_audio_bytes = 0
+        self._openai_out_audio_chunks = 0
+        self._openai_out_audio_bytes = 0
+        self._openai_raw_server_event_counts: dict[str, int] = {}
+        self._turn_index = 0
+        self._turn_openai_audio_chunks = 0
+        self._turn_openai_audio_bytes = 0
+        self._turn_started_monotonic: float | None = None
         client = getattr(websocket, "client", None)
         ws_url = getattr(websocket, "url", None)
         _LOGGER.debug(
-            "TwilioHandler initialized.",
-            extra={"client": str(client), "path": getattr(ws_url, "path", None)},
+            "TwilioHandler initialized client=%s path=%s startup_buffer_chunks=%d",
+            client,
+            getattr(ws_url, "path", None),
+            self.STARTUP_BUFFER_CHUNKS,
         )
-
-    def _should_log_stream_detail(self) -> bool:
-        """Returns whether per-frame stream debug logging is enabled."""
-        return settings.VERBOSE_TWILIO_STREAM_LOGGING
 
     def _is_sample_boundary(self, count: int) -> bool:
         """Returns True when count lands on configured sampling boundary."""
@@ -145,14 +157,10 @@ class TwilioHandler:
         Raises:
             ValueError: If ``OPENAI_API_KEY`` is not configured.
         """
-        _LOGGER.debug("TwilioHandler.start() entered.")
         # Tool calls from the model are proxied through this client/server pair.
         self._backend_client = BackendClient(settings.backend_url, settings.BACKEND_API_KEY)
-        _LOGGER.debug("BackendClient initialized for TwilioHandler.", extra={"backend_url": settings.backend_url})
         self._mcp_server = BackendMCPServer(self._backend_client, logger=self._logger)
-        _LOGGER.debug("BackendMCPServer initialized for TwilioHandler.")
         agent = create_agent(self._mcp_server)
-        _LOGGER.debug("Realtime agent created from MCP server.")
 
         # Fail fast before opening transports if required credentials are absent.
         if not settings.OPENAI_API_KEY:
@@ -161,27 +169,25 @@ class TwilioHandler:
 
         # Create and enter realtime session before accepting websocket messages.
         runner = RealtimeRunner(agent)
-        _LOGGER.debug("RealtimeRunner created; opening realtime session.")
         self.session = await runner.run(
             model_config={
                 "api_key": settings.OPENAI_API_KEY,
                 "initial_model_settings": {
                     "model_name": settings.OPENAI_REALTIME_MODEL,
+                    "output_modalities": ["audio"],
                     "input_audio_format": "g711_ulaw",
                     "output_audio_format": "g711_ulaw",
+                    "voice": settings.OPENAI_REALTIME_VOICE,
                     "turn_detection": {
-                        "type": "server_vad",
+                        "type": settings.OPENAI_TURN_DETECTION_TYPE,
                         "interrupt_response": True,
                         "create_response": True,
                     },
-                    "voice": "cove",
                 },
                 "playback_tracker": self.playback_tracker,
             }
         )
-        _LOGGER.debug("Realtime session created; entering session context.")
         await self.session.enter()
-        _LOGGER.debug("Realtime session entered successfully.")
 
         # Accept websocket only after session is ready to consume audio.
         await self.websocket.accept()
@@ -252,7 +258,7 @@ class TwilioHandler:
 
         # Ensure all loop tasks exit before releasing network resources.
         await self._cancel_background_tasks()
-        _LOGGER.debug("TwilioHandler background tasks cancelled and drained.")
+        self._log_call_summary()
 
         # Release backend HTTP connection pool resources.
         if self._backend_client:
@@ -324,19 +330,12 @@ class TwilioHandler:
         try:
             while not self._is_shutting_down:
                 message_text = await self.websocket.receive_text()
-                if self._should_log_stream_detail():
-                    _LOGGER.debug(
-                        "Raw Twilio websocket message received.",
-                        extra={"bytes": len(message_text)},
-                    )
                 try:
                     message = json.loads(message_text)
                 except json.JSONDecodeError:
                     _LOGGER.warning("Received non-JSON message from Twilio.")
                     await self._log_internal_error("invalid_twilio_message_json")
                     continue
-                if self._should_log_stream_detail():
-                    _LOGGER.debug("Parsed Twilio message.", extra={"event_type": message.get("event")})
                 await self._handle_twilio_message(message)
         except asyncio.CancelledError:
             _LOGGER.debug("Twilio message loop cancelled.")
@@ -354,12 +353,10 @@ class TwilioHandler:
         Args:
             event: Realtime event emitted by the OpenAI session.
         """
-        _LOGGER.debug(
-            "Handling realtime event.",
-            extra={"event_type": event.type, "call_id": self._call_id, "session_id": self._session_id},
-        )
+        _LOGGER.debug("Handling realtime event type=%s", event.type)
         # Capture session id early so all subsequent logs include it.
         self._capture_session_id_from_event(event)
+        self._update_realtime_diagnostics(event)
 
         # Persist normalized event details when logger is available.
         if self._logger:
@@ -373,6 +370,10 @@ class TwilioHandler:
 
             # Convert raw mulaw bytes to base64 payload expected by Twilio.
             base64_audio = base64.b64encode(event.audio.data).decode("utf-8")
+            self._openai_out_audio_chunks += 1
+            self._openai_out_audio_bytes += len(event.audio.data)
+            self._turn_openai_audio_chunks += 1
+            self._turn_openai_audio_bytes += len(event.audio.data)
             await self._try_log_call_event(
                 event_type="media",
                 payload={"bytes": len(event.audio.data), "item_id": event.audio.item_id},
@@ -387,8 +388,10 @@ class TwilioHandler:
                 }
             )
             _LOGGER.debug(
-                "Forwarded model audio to Twilio.",
-                extra={"stream_sid": self._stream_sid, "bytes": len(event.audio.data)},
+                "Forwarded model audio to Twilio stream_sid=%s bytes=%d out_chunks=%d",
+                self._stream_sid,
+                len(event.audio.data),
+                self._openai_out_audio_chunks,
             )
 
             # Store mark metadata so future Twilio mark acknowledgements can be
@@ -407,10 +410,7 @@ class TwilioHandler:
                     "mark": {"name": mark_id},
                 }
             )
-            _LOGGER.debug(
-                "Sent Twilio mark event for playback tracking.",
-                extra={"mark_id": mark_id, "stream_sid": self._stream_sid},
-            )
+            _LOGGER.debug("Sent Twilio mark event mark_id=%s stream_sid=%s", mark_id, self._stream_sid)
         elif event.type == "audio_interrupted":
             if not self._stream_sid:
                 return
@@ -431,9 +431,6 @@ class TwilioHandler:
             message: Parsed Twilio websocket JSON event.
         """
         event = message.get("event")
-        if event != "media" or self._should_log_stream_detail():
-            _LOGGER.debug("Routing Twilio event.", extra={"event_type": event, "call_id": self._call_id})
-
         # Log every inbound frame category for call-level auditing.
         await self._try_log_call_event(
             event_type=event or "unknown",
@@ -519,24 +516,18 @@ class TwilioHandler:
             await self._log_internal_error("invalid_twilio_media_payload")
             return
 
+        self._twilio_in_audio_frames += 1
+        self._twilio_in_audio_bytes += len(ulaw_bytes)
         self._audio_buffer.extend(ulaw_bytes)
         self._media_frame_count += 1
-        if self._should_log_stream_detail():
+        if self._is_sample_boundary(self._media_frame_count):
             _LOGGER.debug(
-                "Buffered incoming caller audio chunk.",
-                extra={"chunk_bytes": len(ulaw_bytes), "buffer_bytes": len(self._audio_buffer)},
-            )
-        elif self._is_sample_boundary(self._media_frame_count):
-            _LOGGER.debug(
-                "Twilio media frames processed.",
-                extra={
-                    "media_frame_count": self._media_frame_count,
-                    "buffer_bytes": len(self._audio_buffer),
-                },
+                "Twilio media frames processed count=%d in_bytes=%d buffer_bytes=%d",
+                self._media_frame_count,
+                self._twilio_in_audio_bytes,
+                len(self._audio_buffer),
             )
         if len(self._audio_buffer) >= self.BUFFER_SIZE_BYTES:
-            if self._should_log_stream_detail():
-                _LOGGER.debug("Audio buffer reached flush threshold; flushing now.")
             await self._flush_audio_buffer()
 
     async def _handle_mark_event(self, message: dict[str, Any]) -> None:
@@ -559,7 +550,12 @@ class TwilioHandler:
             )
 
     async def _flush_audio_buffer(self) -> None:
-        """Flushes buffered caller audio into the realtime session."""
+        """Flushes buffered caller audio into the realtime session.
+
+        The first caller frames may arrive before the realtime backend is fully
+        warm. This function can hold the initial N chunk windows and send them
+        together once warmup is complete.
+        """
         if not self._audio_buffer or not self.session:
             _LOGGER.debug(
                 "Skipping audio buffer flush; no buffered data or inactive session.",
@@ -570,14 +566,37 @@ class TwilioHandler:
         self._audio_buffer.clear()
         self._last_buffer_send_time = time.time()
         self._audio_flush_count += 1
-        if self._should_log_stream_detail():
-            _LOGGER.debug("Sending buffered audio to realtime session.", extra={"bytes": len(buffer_data)})
-        elif self._is_sample_boundary(self._audio_flush_count):
+        if not self._startup_warmed:
+            self._startup_buffer.extend(buffer_data)
+            target_bytes = self.BUFFER_SIZE_BYTES * self.STARTUP_BUFFER_CHUNKS
+            if len(self._startup_buffer) < target_bytes:
+                _LOGGER.debug(
+                    "Accumulating startup warmup audio buffer.",
+                    extra={
+                        "startup_bytes": len(self._startup_buffer),
+                        "startup_target_bytes": target_bytes,
+                        "startup_buffer_chunks": self.STARTUP_BUFFER_CHUNKS,
+                    },
+                )
+                return
+
+            buffer_data = bytes(self._startup_buffer)
+            self._startup_buffer.clear()
+            self._startup_warmed = True
             _LOGGER.debug(
-                "Flushed buffered audio to realtime session.",
-                extra={"audio_flush_count": self._audio_flush_count, "bytes": len(buffer_data)},
+                "Startup warmup complete; sending buffered caller audio to realtime session.",
+                extra={"bytes": len(buffer_data), "startup_buffer_chunks": self.STARTUP_BUFFER_CHUNKS},
+            )
+
+        if self._is_sample_boundary(self._audio_flush_count):
+            _LOGGER.debug(
+                "Flushed buffered audio to realtime session flushes=%d bytes=%d",
+                self._audio_flush_count,
+                len(buffer_data),
             )
         await self.session.send_audio(buffer_data)
+        self._openai_in_audio_chunks += 1
+        self._openai_in_audio_bytes += len(buffer_data)
 
     async def _buffer_flush_loop(self) -> None:
         """Periodically flushes stale partial buffers to minimize latency.
@@ -612,12 +631,7 @@ class TwilioHandler:
         """
         self._twilio_send_count += 1
         event_type = payload.get("event")
-        if self._should_log_stream_detail() or event_type not in {"media", "mark"}:
-            _LOGGER.debug(
-                "Sending Twilio websocket message.",
-                extra={"event_type": event_type, "stream_sid": payload.get("streamSid")},
-            )
-        elif self._is_sample_boundary(self._twilio_send_count):
+        if self._is_sample_boundary(self._twilio_send_count):
             _LOGGER.debug(
                 "Sent Twilio stream frames.",
                 extra={"twilio_send_count": self._twilio_send_count, "event_type": event_type},
@@ -641,10 +655,8 @@ class TwilioHandler:
             source: Source system (for example ``TWILIO`` or ``OPENAI``).
         """
         if not self._logger:
-            if self._should_log_stream_detail():
-                _LOGGER.debug("Skipping call-event DB write because logger context is not yet initialized.")
             return
-        if event_type != "media" or self._should_log_stream_detail():
+        if event_type != "media":
             _LOGGER.debug(
                 "Persisting call event to DB.",
                 extra={
@@ -704,6 +716,13 @@ class TwilioHandler:
             payload["raw_type"] = raw.type
             if raw.type in {"session.created", "session.updated"} and self._session_id:
                 payload["session_id"] = self._session_id
+            if raw.type == "raw_server_event":
+                raw_data = getattr(raw, "data", None)
+                if isinstance(raw_data, dict):
+                    payload["raw_server_type"] = raw_data.get("type")
+                    payload["raw_server_summary"] = self._summarize_raw_server_payload(raw_data)
+                    if settings.VERBOSE_OPENAI_RAW_EVENTS:
+                        payload["raw_server_event"] = raw_data
 
             if isinstance(raw, RealtimeModelToolCallEvent):
                 # Persist tool start details and remember the tool-call id so we
@@ -778,8 +797,15 @@ class TwilioHandler:
                     )
                 except Exception:
                     _LOGGER.debug("Failed to upsert history_updated item.", exc_info=True)
-        elif event.type in ("audio", "audio_end", "audio_interrupted"):
+        elif event.type == "audio":
             item_id = event.item_id
+            direction = "AGENT"
+            payload["bytes"] = len(event.audio.data)
+            payload["content_index"] = getattr(event, "content_index", event.audio.content_index)
+            payload["response_id"] = getattr(event.audio, "response_id", None)
+        elif event.type in ("audio_end", "audio_interrupted"):
+            item_id = event.item_id
+            direction = "AGENT"
         elif event.type == "agent_start":
             agent_name = event.agent.name
         elif event.type == "agent_end":
@@ -800,10 +826,152 @@ class TwilioHandler:
             tool_call_id=tool_call_id,
             agent_name=agent_name,
         )
-        _LOGGER.debug(
-            "Persisted session event to DB.",
-            extra={"event_type": event.type, "direction": direction, "call_id": self._call_id},
+        _LOGGER.debug("Persisted session event to DB event_type=%s direction=%s", event.type, direction)
+
+    def _update_realtime_diagnostics(self, event: RealtimeSessionEvent) -> None:
+        """Updates per-call counters from realtime events for debugging.
+
+        Args:
+            event: Realtime event emitted by the OpenAI session.
+        """
+        if event.type == "agent_start":
+            self._turn_index += 1
+            self._turn_openai_audio_chunks = 0
+            self._turn_openai_audio_bytes = 0
+            self._turn_started_monotonic = time.monotonic()
+            _LOGGER.debug("Agent turn started turn_index=%d", self._turn_index)
+            return
+
+        if event.type == "agent_end":
+            duration_ms = None
+            if self._turn_started_monotonic is not None:
+                duration_ms = int((time.monotonic() - self._turn_started_monotonic) * 1000)
+            _LOGGER.debug(
+                "Agent turn ended turn_index=%d duration_ms=%s audio_chunks=%d audio_bytes=%d",
+                self._turn_index,
+                duration_ms,
+                self._turn_openai_audio_chunks,
+                self._turn_openai_audio_bytes,
+            )
+            if self._turn_openai_audio_chunks == 0:
+                _LOGGER.warning(
+                    "Agent turn had no audio output turn_index=%d call_id=%s",
+                    self._turn_index,
+                    self._call_id,
+                )
+            return
+
+        if event.type != "raw_model_event":
+            return
+
+        raw = event.data
+        raw_type = getattr(raw, "type", "unknown")
+        if raw_type != "raw_server_event":
+            return
+
+        raw_data = getattr(raw, "data", None)
+        if not isinstance(raw_data, dict):
+            _LOGGER.debug("Received raw_server_event with non-dict payload.")
+            return
+
+        server_type = str(raw_data.get("type", "unknown"))
+        self._openai_raw_server_event_counts[server_type] = (
+            self._openai_raw_server_event_counts.get(server_type, 0) + 1
         )
+
+        # Always log important lifecycle events; sample high-frequency streams.
+        if server_type in {
+            "session.created",
+            "session.updated",
+            "response.created",
+            "response.done",
+            "error",
+        }:
+            summary = self._summarize_raw_server_payload(raw_data)
+            _LOGGER.debug("OpenAI raw event %s summary=%s", server_type, summary)
+        elif server_type == "response.output_audio.delta":
+            count = self._openai_raw_server_event_counts[server_type]
+            if self._is_sample_boundary(count):
+                _LOGGER.debug("OpenAI audio deltas received count=%d", count)
+
+        if settings.VERBOSE_OPENAI_RAW_EVENTS:
+            _LOGGER.debug("OpenAI raw payload type=%s payload=%s", server_type, raw_data)
+
+    @staticmethod
+    def _summarize_raw_server_payload(raw_data: dict[str, Any]) -> dict[str, Any]:
+        """Builds a compact, readable summary of a raw OpenAI server payload.
+
+        Args:
+            raw_data: Raw event dict forwarded by the OpenAI realtime websocket.
+
+        Returns:
+            Filtered summary with high-value fields for diagnostics.
+        """
+        summary_keys = (
+            "type",
+            "event_id",
+            "response_id",
+            "item_id",
+            "output_index",
+            "content_index",
+        )
+        summary = {key: raw_data.get(key) for key in summary_keys if key in raw_data}
+
+        response = raw_data.get("response")
+        if isinstance(response, dict):
+            summary["response_status"] = response.get("status")
+            status_details = response.get("status_details")
+            if isinstance(status_details, dict):
+                summary["response_reason"] = status_details.get("reason")
+                status_error = status_details.get("error")
+                if isinstance(status_error, dict):
+                    summary["response_error_code"] = status_error.get("code")
+                    summary["response_error_type"] = status_error.get("type")
+            output_modalities = response.get("output_modalities")
+            if isinstance(output_modalities, list):
+                summary["response_output_modalities"] = output_modalities
+
+        error = raw_data.get("error")
+        if isinstance(error, dict):
+            summary["error_code"] = error.get("code")
+            summary["error_message"] = error.get("message")
+            summary["error_type"] = error.get("type")
+
+        session = raw_data.get("session")
+        if isinstance(session, dict):
+            summary["model"] = session.get("model")
+            summary["output_modalities"] = session.get("output_modalities")
+            audio = session.get("audio")
+            if isinstance(audio, dict):
+                output = audio.get("output")
+                if isinstance(output, dict):
+                    summary["output_voice"] = output.get("voice")
+                    output_fmt = output.get("format")
+                    if isinstance(output_fmt, dict):
+                        summary["output_format"] = output_fmt.get("type")
+
+        return summary
+
+    def _log_call_summary(self) -> None:
+        """Logs one compact end-of-call summary across the full media pipeline."""
+        _LOGGER.debug(
+            "Call summary call_id=%s twilio_in_frames=%d twilio_in_bytes=%d "
+            "openai_in_chunks=%d openai_in_bytes=%d openai_out_chunks=%d openai_out_bytes=%d",
+            self._call_id,
+            self._twilio_in_audio_frames,
+            self._twilio_in_audio_bytes,
+            self._openai_in_audio_chunks,
+            self._openai_in_audio_bytes,
+            self._openai_out_audio_chunks,
+            self._openai_out_audio_bytes,
+        )
+        if self._openai_raw_server_event_counts:
+            top_events = sorted(
+                self._openai_raw_server_event_counts.items(),
+                key=lambda pair: pair[1],
+                reverse=True,
+            )[:12]
+            _LOGGER.debug("OpenAI raw event counts call_id=%s counts=%s", self._call_id, top_events)
 
     @staticmethod
     def _extract_session_id(raw_event: Any) -> str | None:

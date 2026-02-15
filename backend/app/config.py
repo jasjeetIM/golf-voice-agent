@@ -36,6 +36,6 @@ class Settings(BaseSettings):
     REGULAR_PRICE_CENTS: int = Field(default=10000, ge=0)
     TWILIGHT_PRICE_CENTS: int = Field(default=5000, ge=0)
     TWILIGHT_START_HOUR: int = Field(default=15, ge=0, le=23)
-
+    SEARCH_FRESHNESS_TTL_SECONDS: int = Field(defulat=300, ge=0)
 
 settings = Settings()
